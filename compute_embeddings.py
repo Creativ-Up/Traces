@@ -47,7 +47,7 @@ def main(db_path: Path) -> None:
 
     print(f"\n[3/5] Récupération des descriptions à encoder")
     rows = cur.execute(
-        "SELECT id, description FROM artworks "
+        "SELECT id, COALESCE(description_fr, description) FROM artworks "
         "WHERE description IS NOT NULL ORDER BY id"
     ).fetchall()
     ids = [r[0] for r in rows]

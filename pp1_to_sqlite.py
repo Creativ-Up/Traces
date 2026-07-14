@@ -1,10 +1,12 @@
 """
-PP1 Collection Database — Migration Excel -> SQLite
+PP1 Collection Database — Migration Excel -> SQLite (V2)
 
-Construit la base SQLite selon le schéma défini dans schema.sql.
+Construit la base SQLite selon le schéma défini dans schema.sql :
+- collection (feuilles Database, Transcriptions, List of questions, Type of object)
+- témoignages enregistrés traduits FR/NL/EN (transcriptions_clean.csv)
 
 Usage :
-    python pp1_to_sqlite.py [chemin_xlsx] [chemin_db] [chemin_schema_sql]
+    python pp1_to_sqlite.py [chemin_xlsx] [chemin_db] [chemin_schema_sql] [chemin_csv]
 """
 
 import re
@@ -17,6 +19,10 @@ import pandas as pd
 DEFAULT_XLSX = "PP1-Collection_Database.xlsx"
 DEFAULT_DB = "pp1_collection.db"
 DEFAULT_SCHEMA = "schema.sql"
+DEFAULT_TESTIMONIES_CSV = "transcriptions_clean.csv"
+
+CITIES = {"Lens", "Mons", "Kortrijk"}
+QUESTION_LABEL_RE = re.compile(r"^(Question|Vraag)\s+(\d+)$")
 
 
 # =========================
@@ -118,10 +124,13 @@ def cell(value):
 # =========================
 # IMPORT
 # =========================
-def build_database(xlsx_path: Path, db_path: Path, schema_path: Path) -> None:
-    print(f"[1/4] Lecture des sources")
+def build_database(
+    xlsx_path: Path, db_path: Path, schema_path: Path, testimonies_csv_path: Path
+) -> None:
+    print(f"[1/5] Lecture des sources")
     print(f"  Excel  : {xlsx_path}")
     print(f"  Schéma : {schema_path}")
+    print(f"  CSV témoignages : {testimonies_csv_path}")
     items_df = pd.read_excel(xlsx_path, sheet_name="Database", header=1)
     transcr_df = pd.read_excel(xlsx_path, sheet_name="Transcriptions", header=1)
     questions_df = pd.read_excel(xlsx_path, sheet_name="List of questions", header=1)
@@ -130,7 +139,7 @@ def build_database(xlsx_path: Path, db_path: Path, schema_path: Path) -> None:
     questions_df.columns = ["id", "content"]
     schema_sql = schema_path.read_text(encoding="utf-8")
 
-    print(f"\n[2/4] Création du schéma : {db_path}")
+    print(f"\n[2/5] Création du schéma : {db_path}")
     if db_path.exists():
         db_path.unlink()
     conn = sqlite3.connect(db_path)
@@ -138,7 +147,7 @@ def build_database(xlsx_path: Path, db_path: Path, schema_path: Path) -> None:
     cur = conn.cursor()
 
     # --- Tables de référence ---
-    print(f"\n[3/4] Insertion des données")
+    print(f"\n[3/5] Insertion des données")
     types_clean = list(types_df["name"].dropna().str.strip().unique())
     extra = set(items_df["Type of object"].dropna().str.strip()) - set(types_clean)
     types_clean.extend(sorted(extra))
@@ -187,9 +196,9 @@ def build_database(xlsx_path: Path, db_path: Path, schema_path: Path) -> None:
                 id, keywords, description, description_vector, media_url,
                 date_period, date_year_min, date_year_max,
                 type_of_object_id, emotions, origin,
-                author_name, birthday, places, storage_place,
+                author_name, museum_id, storage_place,
                 popularity, question_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 artwork_id,
@@ -208,8 +217,7 @@ def build_database(xlsx_path: Path, db_path: Path, schema_path: Path) -> None:
                 cell(row["Pulchik's wheel match"]),  # emotions (Plutchik concaténé)
                 cell(row["Origin"]),
                 cell(row["Name"]),
-                cell(row["birthday"]),
-                cell(row["Places"]),
+                cell(row["Museum ID"]),  # n° d'inventaire musée (NULL pour Le Fresnoy)
                 cell(row["Storage place"]),
                 0,  # popularity initial
                 question_id,
@@ -279,13 +287,49 @@ def build_database(xlsx_path: Path, db_path: Path, schema_path: Path) -> None:
             "(la contrainte 1:0..1 n'accepte qu'une transcription par œuvre)"
         )
 
+    # --- Témoignages enregistrés traduits (FR/NL/EN) ---
+    print(f"\n[4/5] Import des témoignages enregistrés")
+    testimonies_df = pd.read_csv(testimonies_csv_path)
+    rec_inserted = 0
+    rec_skipped = 0
+    for _, row in testimonies_df.iterrows():
+        m = QUESTION_LABEL_RE.match(str(row["question"]).strip())
+        if not m:
+            print(f"  ⚠ question non reconnue, ligne ignorée : {row['question']!r}")
+            rec_skipped += 1
+            continue
+        label, num = m.groups()
+        source_file = str(row["fichier_source"]).strip()
+        parts = source_file.split("_")
+        cur.execute(
+            """INSERT INTO recorded_testimonies
+               (question_id, speaker, city, source_file, source_lang,
+                content_fr, content_nl, content_en)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                int(num),
+                parts[0],  # speaker : prénom
+                next((p for p in parts[1:] if p in CITIES), None),  # city
+                source_file,
+                "fr" if label == "Question" else "nl",  # Vraag = source néerlandaise
+                cell(row["fr"]),
+                cell(row["nl"]),
+                cell(row["en"]),
+            ),
+        )
+        rec_inserted += 1
+    print(f"  recorded_testimonies : {rec_inserted}")
+    if rec_skipped:
+        print(f"  ⚠ {rec_skipped} ligne(s) ignorée(s)")
+
     conn.commit()
 
     # --- Vérification ---
-    print(f"\n[4/4] Vérification")
+    print(f"\n[5/5] Vérification")
     for table in [
         "artworks",
         "transcriptions",
+        "recorded_testimonies",
         "types_of_object",
         "questions",
         "artwork_emotions",
@@ -306,7 +350,14 @@ if __name__ == "__main__":
     xlsx = Path(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_XLSX)
     db = Path(sys.argv[2] if len(sys.argv) > 2 else DEFAULT_DB)
     schema = Path(sys.argv[3] if len(sys.argv) > 3 else DEFAULT_SCHEMA)
-    for p, label in [(xlsx, "Excel"), (schema, "Schéma SQL")]:
+    testimonies_csv = Path(
+        sys.argv[4] if len(sys.argv) > 4 else DEFAULT_TESTIMONIES_CSV
+    )
+    for p, label in [
+        (xlsx, "Excel"),
+        (schema, "Schéma SQL"),
+        (testimonies_csv, "CSV témoignages"),
+    ]:
         if not p.exists():
             sys.exit(f"{label} introuvable : {p.resolve()}")
-    build_database(xlsx, db, schema)
+    build_database(xlsx, db, schema, testimonies_csv)

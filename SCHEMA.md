@@ -1,15 +1,31 @@
 # PP1 Collection Database — Schéma
 
-Base SQLite générée par `pp1_to_sqlite.py` à partir de `PP1-Collection_Database.xlsx`,
-selon le DDL défini dans `schema.sql`. Aligné sur le diagramme de classes UML du projet.
+Base SQLite générée à partir de `PP1-Collection_Database.xlsx` (V2) et de
+`transcriptions_clean.csv` (témoignages enregistrés traduits FR/NL/EN), selon
+le DDL défini dans `schema.sql`. Aligné sur le diagramme de classes UML du projet.
+
+**Pipeline de construction** (le visiteur choisit sa langue FR/NL/EN en début
+de session ; tout contenu affiché existe donc en trois versions) :
+
+```
+1. python pp1_to_sqlite.py        # structure + données sources
+2. python translate_content.py    # colonnes *_fr/_nl/_en (NLLB-200, cache local)
+3. python compute_embeddings.py   # vecteurs sur description_fr (langue canonique)
+```
+
+**Internationalisation** : le visiteur choisit sa langue (FR/NL/EN) en début de
+session ; tout contenu affiché existe en trois versions (colonnes `_fr`/`_nl`/`_en`,
+remplies par `fill_translations.py` via NLLB-200). Les colonnes sources d'origine
+sont conservées pour la traçabilité. **Pipeline complet** :
+`pp1_to_sqlite.py` → `fill_translations.py` → `compute_embeddings.py`.
 
 ## Vue d'ensemble
 
 ```
-                         ┌────────────────┐
-                         │   questions    │
-                         └────────┬───────┘
-                                  │ question_id
+                         ┌────────────────┐     ┌───────────────────────┐
+                         │   questions    │◀────│ recorded_testimonies  │
+                         └────────┬───────┘     │  (FR / NL / EN)       │
+                                  │ question_id └───────────────────────┘
                                   ▼
    ┌────────────────┐   ┌────────────────────┐   ┌──────────────────┐
    │ types_of_object│──▶│      artworks      │◀──│  transcriptions  │ 
@@ -31,9 +47,12 @@ selon le DDL défini dans `schema.sql`. Aligné sur le diagramme de classes UML 
 | Colonne                  | Type    | Notes                                                   |
 |--------------------------|---------|---------------------------------------------------------|
 | `id`                     | INTEGER | PK = Database ID du fichier source                      |
-| `keywords`               | TEXT    | NOT NULL. Excel : « Description, Key words » (mots-clés bruts, virgules) |
-| `description`            | TEXT    | NOT NULL. Excel : « Explanation » (texte présenté au visiteur, **base du vecteur**) |
-| `description_vector`     | BLOB    | Embedding sémantique de `description` (via sqlite-vec) — Calculé via `compute_embeddings.py` |
+| `keywords`               | TEXT    | NOT NULL. Excel : « Description, Key words » (mots-clés bruts, usage interne) |
+| `description`            | TEXT    | NOT NULL. Excel : « Explanation » — texte source original (99 FR, 18 EN) |
+| `description_fr`         | TEXT    | Affichage FR + **base du vecteur** (langue canonique : évite le biais de langue du corpus mixte) |
+| `description_nl`         | TEXT    | Affichage NL                                            |
+| `description_en`         | TEXT    | Affichage EN                                            |
+| `description_vector`     | BLOB    | Embedding sémantique de `description_fr` (via sqlite-vec) — Calculé via `compute_embeddings.py` |
 | `media_url`              | TEXT    | URL/références photo (potentiellement multiples)        |
 | `date_period`            | TEXT    | Forme brute lisible (`"1800-1850"`, `"20th century"`)   |
 | `date_year_min`          | INTEGER | Borne basse calculée pour le matching                   |
@@ -42,8 +61,7 @@ selon le DDL défini dans `schema.sql`. Aligné sur le diagramme de classes UML 
 | `emotions`               | TEXT    | Émotions Plutchik concaténées (vue dénormalisée, voir `artwork_emotions` pour les requêtes) |
 | `origin`                 | TEXT    | NOT NULL. Le Fresnoy / Abby / Maison des collections    |
 | `author_name`            | TEXT    | Nom(s) brut(s)                                          |
-| `birthday`               | TEXT    | Date associée à l'auteur si connue                      |
-| `places`                 | TEXT    | Lieux liés (texte brut)                                 |
+| `museum_id`              | TEXT    | Excel : « Museum ID ». N° d'inventaire musée (`MSK_0320`, `MOS_5162`, `JL.2022.0.182`…). NULL pour les 4 œuvres Le Fresnoy (IDs 1–4) |
 | `storage_place`          | TEXT    | Lieu de stockage                                        |
 | `popularity`             | INTEGER | NOT NULL, défaut 0. Compteur incrémenté par le backend  |
 | `question_id`            | INTEGER | FK → `questions.id` (peut être NULL : actuellement l'ID 15 ne possède pas de question associée)      |
@@ -60,17 +78,53 @@ Issue de la roue de Plutchik. Utilisée pour la **similarité Jaccard** sur les 
 
 ### `transcriptions` — Relation 1:0..1 (85 lignes)
 
-| Colonne          | Type    | Notes                                       |
-|------------------|---------|---------------------------------------------|
-| `id`             | INTEGER | PK                         |
-| `artwork_id`     | INTEGER | FK → `artworks.id`, **UNIQUE** (1:0..1)     |
-| `transcription`  | TEXT    | Texte transcrit                             |
-| `explanation`    | TEXT    | Contexte historique                         |
-| `translation`    | TEXT    | Traduction si applicable                    |
+| Colonne              | Type    | Notes                                       |
+|----------------------|---------|---------------------------------------------|
+| `id`                 | INTEGER | PK                                          |
+| `artwork_id`         | INTEGER | FK → `artworks.id`, **UNIQUE** (1:0..1)     |
+| `transcription`      | TEXT    | Texte original porté par l'objet — affiché tel quel (artefact, non traduit) |
+| `explanation`        | TEXT    | Contexte historique — source (FR)           |
+| `explanation_fr/nl/en` | TEXT  | Versions affichées selon la langue de session |
+| `translation`        | TEXT    | Traduction moderne du texte de l'objet — source (EN) |
+| `translation_fr/nl/en` | TEXT  | Versions affichées selon la langue de session |
 
 ### `types_of_object` (28 lignes) et `questions` (12 lignes)
 
 Tables de référence (vocabulaire contrôlé et questions du parcours visiteur).
+Les deux portent des colonnes trilingues pour l'affichage selon la langue de
+session : `name_fr/nl/en` et `content_fr/nl/en` (remplies par
+`translate_content.py` ; pour les questions, remplacer les versions FR/NL
+générées par les formulations officielles utilisées lors des interviews).
+Les deux sont affichées au visiteur et portent donc des colonnes trilingues :
+`name_fr/nl/en` pour les types, `content_fr/nl/en` pour les questions (la
+colonne source `name`/`content` est conservée). ⚠ Pour `questions`, remplacer
+les traductions machine par les **formulations officielles** FR/NL utilisées
+lors des interviews.
+
+### `recorded_testimonies` — Témoignages enregistrés traduits (155 lignes)
+
+Témoignages recueillis en interview (32 personnes, sites de Lens, Mons et
+Kortrijk), rattachés aux **questions** du parcours (pas aux œuvres) et
+disponibles en trois langues. La langue source est celle de l'enregistrement
+(`fr` ou `nl`) ; les deux autres versions sont des traductions automatiques
+(pipeline faster-whisper + NLLB-200). À ne pas confondre avec `testimonies`
+(témoignages saisis par les visiteurs sur le photomaton, avec modération).
+
+| Colonne       | Type    | Notes                                                   |
+|---------------|---------|---------------------------------------------------------|
+| `id`          | INTEGER | PK                                                      |
+| `question_id` | INTEGER | FK → `questions.id`                                     |
+| `speaker`     | TEXT    | Prénom (extrait de `fichier_source`)                    |
+| `city`        | TEXT    | `Lens` / `Mons` / `Kortrijk`                            |
+| `source_file` | TEXT    | Nom du fichier audio source (traçabilité)               |
+| `source_lang` | TEXT    | `fr` ou `nl` (CHECK). « Question N » = fr, « Vraag N » = nl |
+| `content_fr`  | TEXT    | NOT NULL                                                |
+| `content_nl`  | TEXT    | NOT NULL                                                |
+| `content_en`  | TEXT    | NOT NULL                                                |
+| —             |         | **UNIQUE (question_id, source_file)**                   |
+
+**Cardinalités** : 0..N témoignages par question (de 12 à 15 selon la question) ;
+une personne peut témoigner sur plusieurs questions.
 
 ### `visitors` — Sessions visiteurs éphémères
 
@@ -97,7 +151,11 @@ Tables de référence (vocabulaire contrôlé et questions du parcours visiteur)
 | `id`             | INTEGER | PK                                                          |
 | `visitor_id`     | TEXT    | FK → `visitors.id` (nullable si anonymisation)              |
 | `artwork_id`     | INTEGER | FK → `artworks.id` (1 témoignage = 1 œuvre)                 |
-| `content`        | TEXT    | Contenu                                                     |
+| `content`        | TEXT    | Texte original saisi/dicté par le visiteur                  |
+| `source_lang`    | TEXT    | `fr` / `nl` / `en` : langue de l'original (CHECK)           |
+| `content_fr`     | TEXT    | Traduction FR — remplie lors de la modération               |
+| `content_nl`     | TEXT    | Traduction NL — remplie lors de la modération               |
+| `content_en`     | TEXT    | Traduction EN — remplie lors de la modération               |
 | `status`         | TEXT    | `pending` / `validated` / `censored`                        |
 | `consent_given`  | INTEGER | 0/1 : publication autorisée par le visiteur                 |
 | `created_at`     | TEXT    | Horodatage de création                                      |
@@ -109,7 +167,37 @@ Tables de référence (vocabulaire contrôlé et questions du parcours visiteur)
 mais ne témoigne pas forcément sur toutes), au plus 1 témoignage par couple (visiteur, œuvre).
 
 **Règle métier** : un témoignage n'est visible aux autres visiteurs que si
-`status = 'validated'` ET `consent_given = 1`.
+`status = 'validated'` ET `consent_given = 1` ET ses traductions sont
+renseignées (les trois `content_*` sont produits au moment de la modération).
+
+### `artwork_published_testimonies` — Vue de consultation
+
+Vue (lecture seule) qui unifie, pour une œuvre donnée, **tous les témoignages
+publiables** : les témoignages enregistrés (rattachés via la question de
+l'œuvre, publiables par définition) et les témoignages visiteurs qui passent
+la règle métier ci-dessus. C'est le point d'entrée recommandé pour le backend
+lors de la consultation d'une œuvre :
+
+```sql
+SELECT kind, speaker, source_lang, content_fr, content_nl, content_en
+FROM artwork_published_testimonies
+WHERE artwork_id = ?;
+```
+
+| Colonne       | Type    | Notes                                                    |
+|---------------|---------|----------------------------------------------------------|
+| `artwork_id`  | INTEGER | Œuvre consultée                                          |
+| `kind`        | TEXT    | `recorded` (interview) / `visitor` (photomaton)          |
+| `source_id`   | INTEGER | id dans la table d'origine (selon `kind`)                |
+| `speaker`     | TEXT    | Prénom : `recorded_testimonies.speaker` (interviews) ou `visitors.surname` (visiteurs, facultatif → NULL) |
+| `source_lang` | TEXT    | Langue de l'enregistrement/saisie d'origine              |
+| `content_fr`  | TEXT    | —                                                        |
+| `content_nl`  | TEXT    | —                                                        |
+| `content_en`  | TEXT    | —                                                        |
+
+Un témoignage enregistré apparaît pour **chacune des œuvres** de sa question
+(la vue matérialise la relation question → œuvres à la lecture, sans dupliquer
+le stockage) : ~1 480 lignes virtuelles pour 155 + N témoignages stockés.
 
 ### `summaries` — Résumés générés par LLM (relation 1:1 avec visitors)
 
