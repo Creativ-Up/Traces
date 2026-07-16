@@ -1,8 +1,10 @@
 # PP1 Collection Database — Schéma
 
-Base SQLite générée à partir de `PP1-Collection_Database.xlsx` (V2) et de
-`transcriptions_clean.csv` (témoignages enregistrés traduits FR/NL/EN), selon
-le DDL défini dans `schema.sql`. Aligné sur le diagramme de classes UML du projet.
+Base SQLite générée à partir de `PP1-Collection_Database.xlsx` et des
+témoignages enregistrés traduits FR/NL/EN (fichier de travail
+`transcriptions_clean.csv`, non versionné ici — la table `recorded_testimonies`
+est livrée peuplée), selon le DDL défini dans `schema.sql`. Aligné sur le
+diagramme de classes UML du projet.
 
 **Pipeline de construction** (le visiteur choisit sa langue FR/NL/EN en début
 de session ; tout contenu affiché existe donc en trois versions) :
@@ -11,13 +13,19 @@ de session ; tout contenu affiché existe donc en trois versions) :
 1. python pp1_to_sqlite.py        # structure + données sources
 2. python translate_content.py    # colonnes *_fr/_nl/_en (NLLB-200, cache local)
 3. python compute_embeddings.py   # vecteurs sur description_fr (langue canonique)
+4. python migrate_v3.py <db> review_translations.xlsx
+                                  # V3 : traductions relues/corrigées, référentiel
+                                  # emotions, keywords i18n, thumbnail_url,
+                                  # normalisation media_url
+5. python check_images.py --db <db> --images <dossier>
+                                  # contrôle d'intégrité DB <-> dossier d'images
+                                  # (images renommées : voir le Drive partagé du projet)
 ```
 
-**Internationalisation** : le visiteur choisit sa langue (FR/NL/EN) en début de
-session ; tout contenu affiché existe en trois versions (colonnes `_fr`/`_nl`/`_en`,
-remplies par `fill_translations.py` via NLLB-200). Les colonnes sources d'origine
-sont conservées pour la traçabilité. **Pipeline complet** :
-`pp1_to_sqlite.py` → `fill_translations.py` → `compute_embeddings.py`.
+**Internationalisation** : les colonnes `_fr`/`_nl`/`_en` sont d'abord remplies
+par `translate_content.py` (NLLB-200), puis écrasées par les versions relues et
+corrigées via `migrate_v3.py` (étape 4). Les colonnes sources d'origine sont
+conservées pour la traçabilité.
 
 ## Vue d'ensemble
 
@@ -53,7 +61,8 @@ sont conservées pour la traçabilité. **Pipeline complet** :
 | `description_nl`         | TEXT    | Affichage NL                                            |
 | `description_en`         | TEXT    | Affichage EN                                            |
 | `description_vector`     | BLOB    | Embedding sémantique de `description_fr` (via sqlite-vec) — Calculé via `compute_embeddings.py` |
-| `media_url`              | TEXT    | URL/références photo (potentiellement multiples)        |
+| `media_url`              | TEXT    | Noms de fichiers image avec extension, séparés par `, `. **Normalisés V3** : minuscules, `[a-z0-9-]` uniquement (`imadeyou-01-053.jpg`). NULL pour l'œuvre 15 (aucune photo) |
+| `thumbnail_url`          | TEXT    | **V3.** Vignette de l'œuvre = vue principale (nom le plus court de `media_url`). NULL pour l'œuvre 15 |
 | `date_period`            | TEXT    | Forme brute lisible (`"1800-1850"`, `"20th century"`)   |
 | `date_year_min`          | INTEGER | Borne basse calculée pour le matching                   |
 | `date_year_max`          | INTEGER | Borne haute calculée pour le matching                   |
@@ -65,6 +74,7 @@ sont conservées pour la traçabilité. **Pipeline complet** :
 | `storage_place`          | TEXT    | Lieu de stockage                                        |
 | `popularity`             | INTEGER | NOT NULL, défaut 0. Compteur incrémenté par le backend  |
 | `question_id`            | INTEGER | FK → `questions.id` (peut être NULL : actuellement l'ID 15 ne possède pas de question associée)      |
+| `keywords_fr` `keywords_nl` `keywords_en` | TEXT | **V3.** Mots-clés affichables traduits et relus (feuille « Description - Key words ») |
 
 ### `artwork_emotions` — Table de jointure (346 lignes)
 
@@ -75,6 +85,25 @@ Issue de la roue de Plutchik. Utilisée pour la **similarité Jaccard** sur les 
 | `artwork_id`| INTEGER | FK → `artworks.id` (ON DELETE CASCADE)         |
 | `emotion`   | TEXT    | Émotion en minuscules (joy, sadness, trust…)   |
 | PK          |         | `(artwork_id, emotion)`                        |
+
+> **V3** : typos corrigées dans les données (`submision` → `submission`,
+> `dissaproval` → `disapproval`).
+
+### `emotions` — Référentiel i18n des émotions (25 lignes) — **V3**
+
+Libellés affichables des émotions Plutchik, dans les trois langues. Jointure :
+`artwork_emotions.emotion = emotions.emotion`.
+
+| Colonne   | Type | Notes                                   |
+|-----------|------|-----------------------------------------|
+| `emotion` | TEXT | PK. Clé en minuscules (= `artwork_emotions.emotion`) |
+| `name_fr` | TEXT | NOT NULL. Libellé français              |
+| `name_nl` | TEXT | NOT NULL. Libellé néerlandais           |
+| `name_en` | TEXT | NOT NULL. Libellé anglais               |
+
+14 entrées proviennent de la relecture (`review_translations.xlsx`, feuille
+Emotions) ; 11 complètent les émotions utilisées en base mais absentes de la
+feuille (traductions Plutchik standard, **à faire valider**).
 
 ### `transcriptions` — Relation 1:0..1 (85 lignes)
 
@@ -114,14 +143,20 @@ disponibles en trois langues. La langue source est celle de l'enregistrement
 |---------------|---------|---------------------------------------------------------|
 | `id`          | INTEGER | PK                                                      |
 | `question_id` | INTEGER | FK → `questions.id`                                     |
-| `speaker`     | TEXT    | Prénom (extrait de `fichier_source`)                    |
 | `city`        | TEXT    | `Lens` / `Mons` / `Kortrijk`                            |
-| `source_file` | TEXT    | Nom du fichier audio source (traçabilité)               |
 | `source_lang` | TEXT    | `fr` ou `nl` (CHECK). « Question N » = fr, « Vraag N » = nl |
 | `content_fr`  | TEXT    | NOT NULL                                                |
 | `content_nl`  | TEXT    | NOT NULL                                                |
 | `content_en`  | TEXT    | NOT NULL                                                |
-| —             |         | **UNIQUE (question_id, source_file)**                   |
+| `created_at`  | TEXT    | **V3.1.** Date d'enregistrement du témoignage (ISO `YYYY-MM-DD`), issue de la campagne de collecte (oct. 2025 Mons/Lens, fév. 2026 Kortrijk) |
+
+> **V3.1** : les colonnes `speaker` et `source_file` ont été supprimées, et
+> côté visiteurs `visitors.surname` a également disparu (le visiteur ne donne
+> plus son prénom) ; `testimonies.city` a été ajoutée. Tout témoignage est
+> identifié par le couple **(ville, date)**.
+> (anonymisation). La correspondance ligne ↔ fichier audio d'origine est
+> conservée hors base, dans `migrate_v3.py` (`RECORDED_IDS`), qui sert de clé
+> de ré-import des traductions depuis `review_translations.xlsx`.
 
 **Cardinalités** : 0..N témoignages par question (de 12 à 15 selon la question) ;
 une personne peut témoigner sur plusieurs questions.
@@ -131,7 +166,6 @@ une personne peut témoigner sur plusieurs questions.
 | Colonne     | Type    | Notes                                          |
 |-------------|---------|------------------------------------------------|
 | `id`        | TEXT    | PK = UUID de session (généré côté backend)     |
-| `surname`   | TEXT    | Prénom/pseudo donné par le visiteur            |
 | `created_at`| TEXT    | Début de session                               |
 | `ended_at`  | TEXT    | Fin de session (NULL = active)                 |
 
@@ -159,6 +193,7 @@ une personne peut témoigner sur plusieurs questions.
 | `status`         | TEXT    | `pending` / `validated` / `censored`                        |
 | `consent_given`  | INTEGER | 0/1 : publication autorisée par le visiteur                 |
 | `created_at`     | TEXT    | Horodatage de création                                      |
+| `city`        | TEXT    | **V3.1.** Ville du site d'installation du photomaton (renseignée par le backend à l'insertion) — avec `created_at`, identifie le témoignage |
 | `moderated_at`   | TEXT    | Horodatage de modération                                    |
 | `moderated_by`   | INTEGER | FK → `staff.id`                                             |
 | —                |         | **UNIQUE (visitor_id, artwork_id)** : un visiteur ne peut laisser qu'un seul témoignage par œuvre. La contrainte ne s'applique pas si `visitor_id` est NULL (anonymisation après suppression du visiteur).                         
@@ -179,7 +214,7 @@ la règle métier ci-dessus. C'est le point d'entrée recommandé pour le backen
 lors de la consultation d'une œuvre :
 
 ```sql
-SELECT kind, speaker, source_lang, content_fr, content_nl, content_en
+SELECT kind, city, created_at, source_lang, content_fr, content_nl, content_en
 FROM artwork_published_testimonies
 WHERE artwork_id = ?;
 ```
@@ -189,7 +224,8 @@ WHERE artwork_id = ?;
 | `artwork_id`  | INTEGER | Œuvre consultée                                          |
 | `kind`        | TEXT    | `recorded` (interview) / `visitor` (photomaton)          |
 | `source_id`   | INTEGER | id dans la table d'origine (selon `kind`)                |
-| `speaker`     | TEXT    | Prénom : `recorded_testimonies.speaker` (interviews) ou `visitors.surname` (visiteurs, facultatif → NULL) |
+| `city`        | TEXT    | Ville : site de collecte (interviews) ou site d'installation (visiteurs). Avec `created_at`, identifie le témoignage — plus aucun prénom n'est exposé (V3.1) |
+| `created_at`  | TEXT    | Date du témoignage (ISO)                       |
 | `source_lang` | TEXT    | Langue de l'enregistrement/saisie d'origine              |
 | `content_fr`  | TEXT    | —                                                        |
 | `content_nl`  | TEXT    | —                                                        |
