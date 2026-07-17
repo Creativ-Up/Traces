@@ -24,7 +24,7 @@ CREATE TABLE artworks (
     museum_id               TEXT,                  -- n° d'inventaire musée (ex : MSK_0320) ; NULL pour Le Fresnoy
     storage_place           TEXT,
     popularity              INTEGER NOT NULL DEFAULT 0,
-    question_id             INTEGER, thumbnail_url TEXT, keywords_fr TEXT, keywords_nl TEXT, keywords_en TEXT,
+    question_id             INTEGER, thumbnail_url TEXT, keywords_fr TEXT, keywords_nl TEXT, keywords_en TEXT, title TEXT, title_fr TEXT, title_nl TEXT, title_en TEXT,
     FOREIGN KEY (type_of_object_id) REFERENCES types_of_object(id),
     FOREIGN KEY (question_id) REFERENCES questions(id),
     CHECK (date_year_max IS NULL OR date_year_min IS NULL OR date_year_max >= date_year_min)

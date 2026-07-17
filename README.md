@@ -15,12 +15,17 @@ contenu affiché existe en trois versions** (colonnes `_fr` / `_nl` / `_en`).
 | `translate_content.py`  | Étape 2 — traductions automatiques NLLB-200 (colonnes `_fr/_nl/_en`) |
 | `compute_embeddings.py` | Étape 3 — vecteurs sémantiques (`description_fr`)                 |
 | `migrate_v3.py`         | Étape 4 — **V3** : ré-import des traductions relues/corrigées, référentiel `emotions`, `keywords_*`, `thumbnail_url`, normalisation `media_url` |
+| `migrate_v4.py`         | Étape 5 — **V4** : ajoute `artworks.title` / `title_fr/nl/en` |
 | `check_images.py`       | Contrôle d'intégrité DB ↔ dossier d'images (exit code 1 si référence cassée) |
 | `matching_report.csv`   | Mapping œuvre → images (une ligne par œuvre) pour vérification humaine |
 | *(Drive partagé)*       | Les 261 images renommées (`pictures_data_renamed.zip`) sont hébergées hors Git — voir le lien dans le canal du projet |
 
 ## Nouveautés (juillet 2026)
 
+- **V4 — `artworks.title` / `title_fr` / `title_nl` / `title_en`** : titre de
+  l'œuvre, i18n (même convention que `description`). Nullable : toutes les
+  œuvres n'ont pas de titre. Demandé par le client (traces) pour parité avec
+  `description`/`keywords`.
 - **`artworks.thumbnail_url`** : vignette de l'œuvre, remplie pour les 116
   œuvres avec images (= la vue principale, nom le plus court).
 - **`artworks.media_url` normalisé et résolu** : noms en minuscules, seuls

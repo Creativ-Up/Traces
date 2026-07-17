@@ -17,7 +17,8 @@ de session ; tout contenu affiché existe donc en trois versions) :
                                   # V3 : traductions relues/corrigées, référentiel
                                   # emotions, keywords i18n, thumbnail_url,
                                   # normalisation media_url
-5. python check_images.py --db <db> --images <dossier>
+5. python migrate_v4.py <db>      # V4 : artworks.title / title_fr/nl/en
+6. python check_images.py --db <db> --images <dossier>
                                   # contrôle d'intégrité DB <-> dossier d'images
                                   # (images renommées : voir le Drive partagé du projet)
 ```
@@ -75,6 +76,8 @@ conservées pour la traçabilité.
 | `popularity`             | INTEGER | NOT NULL, défaut 0. Compteur incrémenté par le backend  |
 | `question_id`            | INTEGER | FK → `questions.id` (peut être NULL : actuellement l'ID 15 ne possède pas de question associée)      |
 | `keywords_fr` `keywords_nl` `keywords_en` | TEXT | **V3.** Mots-clés affichables traduits et relus (feuille « Description - Key words ») |
+| `title` `title_fr` `title_nl` `title_en` | TEXT | **V4.** Titre de l'œuvre, i18n. Nullable : toutes les œuvres n'ont pas de titre (contrairement à `description`) |
+| `title` `title_fr` `title_nl` `title_en` | TEXT | **V4.** Titre de l'œuvre, i18n. Nullable : toutes les œuvres n'ont pas de titre (contrairement à `description`) |
 
 ### `artwork_emotions` — Table de jointure (346 lignes)
 
