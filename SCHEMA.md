@@ -18,7 +18,9 @@ de session ; tout contenu affiché existe donc en trois versions) :
                                   # emotions, keywords i18n, thumbnail_url,
                                   # normalisation media_url
 5. python migrate_v4.py <db>      # V4 : artworks.title / title_fr/nl/en
-6. python check_images.py --db <db> --images <dossier>
+6. python migrate_v5.py <db>      # V5 : restaure le point d'extension de media_url
+                                  # (écrasé par erreur en V3)
+7. python check_images.py --db <db> --images <dossier>
                                   # contrôle d'intégrité DB <-> dossier d'images
                                   # (images renommées : voir le Drive partagé du projet)
 ```
@@ -62,7 +64,7 @@ conservées pour la traçabilité.
 | `description_nl`         | TEXT    | Affichage NL                                            |
 | `description_en`         | TEXT    | Affichage EN                                            |
 | `description_vector`     | BLOB    | Embedding sémantique de `description_fr` (via sqlite-vec) — Calculé via `compute_embeddings.py` |
-| `media_url`              | TEXT    | Noms de fichiers image avec extension, séparés par `, `. **Normalisés V3** : minuscules, `[a-z0-9-]` uniquement (`imadeyou-01-053.jpg`). NULL pour l'œuvre 15 (aucune photo) |
+| `media_url`              | TEXT    | Noms de fichiers image avec extension, séparés par `, `. **Normalisés V3** : minuscules, `[a-z0-9-]` uniquement (`imadeyou-01-053.jpg`). NULL pour l'œuvre 15 (aucune photo). **V5** : le point d'extension, écrasé par erreur en V3 (`imadeyou-01-053-jpg`), a été restauré |
 | `thumbnail_url`          | TEXT    | **V3.** Vignette de l'œuvre = vue principale (nom le plus court de `media_url`). NULL pour l'œuvre 15 |
 | `date_period`            | TEXT    | Forme brute lisible (`"1800-1850"`, `"20th century"`)   |
 | `date_year_min`          | INTEGER | Borne basse calculée pour le matching                   |
