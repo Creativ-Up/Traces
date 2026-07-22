@@ -1,0 +1,28 @@
+From ee0bf4d86e78b43e18815b8e6523be9d6d3ed7b4 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Thu, 16 Jul 2026 11:31:59 +0200
+Subject: [PATCH 02/17] Use macOS Metal config
+
+---
+ Cargo.toml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 70af72b..d6608b2 100755
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -6,9 +6,9 @@ edition = "2024"
+ [dependencies]
+ anyhow = "1.0.102"
+ escpos = { version = "0.19.0", features = ["full"] }
+-# qwen3-asr = { version = "0.2", features = ["hub"] } # MacOS with Metal
++qwen3-asr = { version = "0.2", features = ["hub"] } # MacOS with Metal
+ # qwen3-asr = { version = "0.2", default-features = false, features = ["cuda", "hub"] } # CUDA
+-qwen3-asr = { version = "0.2", default-features = false, features = ["hub"] } # CPU only
++# qwen3-asr = { version = "0.2", default-features = false, features = ["hub"] } # CPU only
+ rocket = {version = "0.5.1", features = ["json", "tls"]}
+ serde = { version = "1.0.228", features = ["derive"] }
+ sqlite = "0.37.0"
+-- 
+2.50.1 (Apple Git-155)
+

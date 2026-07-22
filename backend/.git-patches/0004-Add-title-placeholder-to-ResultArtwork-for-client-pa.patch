@@ -1,0 +1,44 @@
+From f372fab1ebc7d9484e75b523c78b398fbee2c804 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Thu, 16 Jul 2026 14:21:57 +0200
+Subject: [PATCH 04/17] Add title placeholder to ResultArtwork for client
+ parity
+
+XXX[back]: traces client mock (data/mock-api-responses.js) expects a
+title: { en, fr, nl } field on artworks, mirroring description. No
+title/title_en/title_fr/title_nl column exists on the artworks table
+yet, so this wires up the struct field as always-None until that
+schema change lands and READ_QUERY/Artwork are extended to populate it.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ src/artworks.rs | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/artworks.rs b/src/artworks.rs
+index adba053..e4210ba 100755
+--- a/src/artworks.rs
++++ b/src/artworks.rs
+@@ -37,6 +37,11 @@ pub struct ResultArtwork {
+     id: i64,
+     keywords: String,
+     description: InternationalizedString,
++    // XXX[back] client-requested field (see traces client repo, data/mock-api-responses.js,
++    // XXX[back] on the `artwork` mock factory). There is no title/title_en/title_fr/title_nl
++    // column on the artworks table yet, so this is always None until that schema change lands
++    // and the SELECT/Artwork struct below are extended to read it, mirroring `description`.
++    title: Option<InternationalizedString>,
+     media_url: Option<String>,
+     date_period: Option<String>,
+     emotions: String,
+@@ -60,6 +65,7 @@ impl From<(Artwork, String)> for ResultArtwork {
+                 artwork.description_fr.unwrap_or_default(),
+                 artwork.description_nl.unwrap_or_default(),
+             ),
++            title: None,
+             media_url: artwork.media_url,
+             date_period: artwork.date_period,
+             emotions: artwork.emotions,
+-- 
+2.50.1 (Apple Git-155)
+

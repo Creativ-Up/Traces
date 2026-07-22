@@ -1,0 +1,16 @@
+[package]
+name = "pp1-backend-rust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+escpos = { version = "0.19.0", features = ["full"] }
+qwen3-asr = { version = "0.2", features = ["hub"] } # MacOS with Metal
+# qwen3-asr = { version = "0.2", default-features = false, features = ["cuda", "hub"] } # CUDA
+# qwen3-asr = { version = "0.2", default-features = false, features = ["hub"] } # CPU only
+reqwest = { version = "0.12", features = ["json"] }
+rocket = {version = "0.5.1", features = ["json", "tls"]}
+serde = { version = "1.0.228", features = ["derive"] }
+sqlite = "0.37.0"
+tempfile = "3.14"

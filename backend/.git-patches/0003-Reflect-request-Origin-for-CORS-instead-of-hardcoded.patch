@@ -1,0 +1,46 @@
+From 5c525fbbd0760de733ab1aff566d1072d58bbeba Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Thu, 16 Jul 2026 13:05:24 +0200
+Subject: [PATCH 03/17] Reflect request Origin for CORS instead of hardcoded
+ port
+
+The server only allowed localhost:8000, breaking requests from other
+local dev ports (e.g. 8080). Echo back the incoming Origin header so
+any local origin is accepted.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ src/main.rs | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/src/main.rs b/src/main.rs
+index 36dba1f..ca1a3c7 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -26,7 +26,6 @@ use rocket::{
+ };
+ 
+ const SERVER_PUBLIC_DIR_VAR: &str = "SERVER_PUBLIC_DIR_VAR";
+-const CORS_CLIENT_PORT: usize = 8000;
+ 
+ #[derive(Responder)]
+ #[response(status = 500, content_type = "json")]
+@@ -135,11 +134,10 @@ impl Fairing for Cors {
+         }
+     }
+ 
+-    async fn on_response<'r>(&self, _request: &'r Request<'_>, response: &mut Response<'r>) {
+-        response.set_header(Header::new(
+-            "Access-Control-Allow-Origin",
+-            format!("http://localhost:{CORS_CLIENT_PORT}"),
+-        ));
++    async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
++        if let Some(origin) = request.headers().get_one("Origin") {
++            response.set_header(Header::new("Access-Control-Allow-Origin", origin.to_string()));
++        }
+         response.set_header(Header::new(
+             "Access-Control-Allow-Methods",
+             "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+-- 
+2.50.1 (Apple Git-155)
+

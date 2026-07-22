@@ -1,0 +1,59 @@
+From 9a04600d03b56f7b9aba09b378a283b5f501199d Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Sat, 18 Jul 2026 00:29:31 +0200
+Subject: [PATCH 13/17] Add catch-all OPTIONS route to fix CORS preflight
+ failures
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Cors fairing only attaches headers on_response — it never
+registered an actual OPTIONS route, so any request needing a CORS
+preflight (POST with a non-"simple" Content-Type, e.g. /transcript's
+audio/wav or /testimony's text/plain) hit Rocket's default 404
+catcher. Browsers require a successful preflight status to proceed,
+so the 404 blocked the real request client-side even though the
+fairing's headers were present on the error response.
+---
+ src/main.rs | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/main.rs b/src/main.rs
+index 729a26b..6bfe70c 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -23,7 +23,7 @@ use rocket::{
+     fs::FileServer,
+     get,
+     http::Header,
+-    launch, post, routes,
++    launch, options, post, routes,
+     serde::json::Json,
+ };
+ 
+@@ -40,6 +40,14 @@ fn index_route() -> &'static str {
+     "Server ok"
+ }
+ 
++// Catch-all preflight responder: browsers require CORS preflight (OPTIONS) requests to
++// get a successful status before sending the actual request (e.g. any POST with a
++// non-"simple" Content-Type like audio/wav or text/plain triggers one) — a 404 here, even
++// with the Cors fairing's headers attached, still fails the preflight and blocks the real
++// request. The Cors fairing (on_response) attaches the actual CORS headers below.
++#[options("/<_path..>")]
++fn options_route(_path: std::path::PathBuf) {}
++
+ #[get("/questions")]
+ fn questions_route(questions: &State<QuestionsState>) -> Json<Questions> {
+     Json(questions.questions().clone())
+@@ -170,6 +178,7 @@ fn rocket() -> _ {
+             "/",
+             routes![
+                 index_route,
++                options_route,
+                 questions_route,
+                 artworks_question_route,
+                 testimonies_route,
+-- 
+2.50.1 (Apple Git-155)
+

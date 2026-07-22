@@ -1,0 +1,350 @@
+From 23914bf3972e82fda183348d57d7c0d36262d35f Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Fri, 17 Jul 2026 23:10:54 +0200
+Subject: [PATCH 11/17] Serialize artwork keywords/emotions/type_of_object as
+ {en,fr,nl}
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- keywords: mirrors the description i18n pattern (columns already
+  existed, fully populated).
+- emotions: new emotions.rs module reads the referential table;
+  ResultArtwork.emotions is now translated labels instead of raw
+  Plutchik keys. Internal Artwork.emotions (raw string) and
+  scoring.rs's matching algorithm are untouched — only the final
+  result-shaping step, after scoring/selection, changed.
+- type_of_object: new types_of_object.rs module, same treatment;
+  internal type_of_object_id usage in scoring.rs untouched.
+---
+ src/artworks.rs        | 58 +++++++++++++++++++++++++++++++++++-------
+ src/emotions.rs        | 54 +++++++++++++++++++++++++++++++++++++++
+ src/main.rs            |  2 ++
+ src/scoring.rs         | 16 ++++++++++--
+ src/types_of_object.rs | 57 +++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 176 insertions(+), 11 deletions(-)
+ create mode 100644 src/emotions.rs
+ create mode 100644 src/types_of_object.rs
+
+diff --git a/src/artworks.rs b/src/artworks.rs
+index f04b4e1..9bdd1f7 100755
+--- a/src/artworks.rs
++++ b/src/artworks.rs
+@@ -1,18 +1,23 @@
+ use crate::{
+     common::InternationalizedString,
+     database::{self, Query},
++    emotions::Emotions,
++    types_of_object::TypesOfObject,
+ };
+ use anyhow::Result;
+ use serde::Serialize;
+ use sqlite::Row;
+ 
+-const READ_QUERY: &str = "SELECT id, keywords, description, description_en, description_fr, description_nl, description_vector, media_url, thumbnail_url, date_period, date_year_min, date_year_max, type_of_object_id, emotions, origin, author_name, museum_id, storage_place, popularity, question_id, title_en, title_fr, title_nl FROM artworks";
++const READ_QUERY: &str = "SELECT id, keywords, keywords_en, keywords_fr, keywords_nl, description, description_en, description_fr, description_nl, description_vector, media_url, thumbnail_url, date_period, date_year_min, date_year_max, type_of_object_id, emotions, origin, author_name, museum_id, storage_place, popularity, question_id, title_en, title_fr, title_nl FROM artworks";
+ 
+ /// An artwork.
+ #[derive(Clone, Serialize)]
+ pub struct Artwork {
+     id: i64,
+     keywords: String,
++    keywords_en: Option<String>,
++    keywords_fr: Option<String>,
++    keywords_nl: Option<String>,
+     description: String,
+     description_en: Option<String>,
+     description_fr: Option<String>,
+@@ -39,7 +44,7 @@ pub struct Artwork {
+ #[derive(Clone, Serialize)]
+ pub struct ResultArtwork {
+     id: i64,
+-    keywords: String,
++    keywords: InternationalizedString,
+     description: InternationalizedString,
+     // Not every artwork has a title (unlike description, which is always present),
+     // so this is None when title_en/fr/nl are all empty in the DB.
+@@ -47,7 +52,8 @@ pub struct ResultArtwork {
+     media_url: Option<String>,
+     thumbnail_url: Option<String>,
+     date_period: Option<String>,
+-    emotions: String,
++    emotions: Vec<InternationalizedString>,
++    type_of_object: Option<InternationalizedString>,
+     origin: String,
+     criterion: String,
+ }
+@@ -56,10 +62,15 @@ impl ResultArtwork {
+     pub fn id(&self) -> i64 {
+         self.id
+     }
+-}
+ 
+-impl From<(Artwork, String)> for ResultArtwork {
+-    fn from((artwork, criterion): (Artwork, String)) -> Self {
++    /// Builds a `ResultArtwork`, translating `emotions`/`type_of_object` via the
++    /// referential tables passed in (see `emotions::Emotions`, `types_of_object::TypesOfObject`).
++    pub fn from_artwork(
++        artwork: Artwork,
++        criterion: String,
++        emotions: &Emotions,
++        types_of_object: &TypesOfObject,
++    ) -> Self {
+         let title = if artwork.title_en.is_none() && artwork.title_fr.is_none() && artwork.title_nl.is_none() {
+             None
+         } else {
+@@ -69,9 +80,23 @@ impl From<(Artwork, String)> for ResultArtwork {
+                 artwork.title_nl.unwrap_or_default(),
+             ))
+         };
++        let artwork_emotions = emotions_str_to_vec(&artwork.emotions);
++        let emotions = emotions
++            .iter()
++            .filter(|e| artwork_emotions.contains(&e.emotion().to_string()))
++            .map(|e| e.name().clone())
++            .collect();
++        let type_of_object = types_of_object
++            .iter()
++            .find(|t| t.id() == artwork.type_of_object_id)
++            .map(|t| t.name().clone());
+         Self {
+             id: artwork.id,
+-            keywords: artwork.keywords,
++            keywords: InternationalizedString::new(
++                artwork.keywords_en.unwrap_or_default(),
++                artwork.keywords_fr.unwrap_or_default(),
++                artwork.keywords_nl.unwrap_or_default(),
++            ),
+             description: InternationalizedString::new(
+                 artwork.description_en.unwrap_or_default(),
+                 artwork.description_fr.unwrap_or_default(),
+@@ -81,13 +106,23 @@ impl From<(Artwork, String)> for ResultArtwork {
+             media_url: artwork.media_url,
+             thumbnail_url: artwork.thumbnail_url,
+             date_period: artwork.date_period,
+-            emotions: artwork.emotions,
++            emotions,
++            type_of_object,
+             origin: artwork.origin,
+             criterion,
+         }
+     }
+ }
+ 
++/// Splits a comma-separated `artworks.emotions` string into trimmed, lowercased keys
++/// matching `emotions.emotion` (mirrors `scoring::emotions_str_to_vec`).
++fn emotions_str_to_vec(emotions: &str) -> Vec<String> {
++    emotions
++        .split(',')
++        .map(|s| s.trim().to_lowercase())
++        .collect()
++}
++
+ /// A set of artworks.
+ #[derive(Clone, Serialize)]
+ pub struct Artworks(Vec<Artwork>);
+@@ -113,9 +148,11 @@ impl Artworks {
+         );
+         query.set_bindings(vec![(":question_id", question_id.into())]);
+         let artworks: Vec<Artwork> = query.execute()?;
++        let emotions = Emotions::read_all()?;
++        let types_of_object = TypesOfObject::read_all()?;
+         Ok(artworks
+             .into_iter()
+-            .map(|a| ResultArtwork::from((a, "random".to_string())))
++            .map(|a| ResultArtwork::from_artwork(a, "random".to_string(), &emotions, &types_of_object))
+             .collect())
+     }
+ 
+@@ -127,6 +164,9 @@ impl Artworks {
+         Artwork,
+         id: i64,
+         keywords: String,
++        keywords_en: Option<String>,
++        keywords_fr: Option<String>,
++        keywords_nl: Option<String>,
+         description: String,
+         description_en: Option<String>,
+         description_fr: Option<String>,
+diff --git a/src/emotions.rs b/src/emotions.rs
+new file mode 100644
+index 0000000..86f1d33
+--- /dev/null
++++ b/src/emotions.rs
+@@ -0,0 +1,54 @@
++use crate::{common::InternationalizedString, database::{self, Query}};
++use anyhow::Result;
++use sqlite::Row;
++
++const READ_QUERY: &str = "SELECT emotion, name_en, name_fr, name_nl FROM emotions";
++
++/// An emotion, translated in the 3 supported languages.
++#[derive(Clone)]
++pub struct Emotion {
++    emotion: String,
++    name: InternationalizedString,
++}
++
++impl Emotion {
++    pub fn emotion(&self) -> &str {
++        self.emotion.as_str()
++    }
++
++    pub fn name(&self) -> &InternationalizedString {
++        &self.name
++    }
++}
++
++/// The set of Plutchik emotions, translated.
++pub struct Emotions(Vec<Emotion>);
++
++impl From<Vec<Emotion>> for Emotions {
++    fn from(value: Vec<Emotion>) -> Self {
++        Emotions(value)
++    }
++}
++
++impl Emotions {
++    /// Returns all the emotions.
++    pub fn read_all() -> Result<Self> {
++        let query = Query::new(READ_QUERY, &Self::map_row);
++        query.execute().map(|r| r.into())
++    }
++
++    pub fn iter(&self) -> impl Iterator<Item = &Emotion> + '_ {
++        self.0.iter()
++    }
++
++    fn map_row(row: Row) -> Emotion {
++        Emotion {
++            emotion: <String as database::MapRowField<String>>::read(&row, "emotion"),
++            name: InternationalizedString::new(
++                <String as database::MapRowField<String>>::read(&row, "name_en"),
++                <String as database::MapRowField<String>>::read(&row, "name_fr"),
++                <String as database::MapRowField<String>>::read(&row, "name_nl"),
++            ),
++        }
++    }
++}
+diff --git a/src/main.rs b/src/main.rs
+index 1736374..358295a 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,11 +1,13 @@
+ mod artworks;
+ mod common;
+ mod database;
++mod emotions;
+ mod print;
+ mod questions;
+ mod scoring;
+ mod testimonies;
+ mod transcription;
++mod types_of_object;
+ 
+ use crate::{
+     artworks::{Artworks, ResultArtwork},
+diff --git a/src/scoring.rs b/src/scoring.rs
+index ca5f351..a7a9789 100755
+--- a/src/scoring.rs
++++ b/src/scoring.rs
+@@ -1,4 +1,8 @@
+-use crate::artworks::{Artwork, Artworks, ResultArtwork};
++use crate::{
++    artworks::{Artwork, Artworks, ResultArtwork},
++    emotions::Emotions,
++    types_of_object::TypesOfObject,
++};
+ use anyhow::{Context, Result, anyhow};
+ use std::{
+     iter::Sum,
+@@ -80,6 +84,9 @@ fn proposals_from_scorings(
+     tags: Vec<&str>,
+     taboo: &[&Artwork],
+ ) -> Result<Vec<ResultArtwork>> {
++    let emotions = Emotions::read_all().context("while retrieving emotions")?;
++    let types_of_object =
++        TypesOfObject::read_all().context("while retrieving types of object")?;
+     let mut result = Vec::with_capacity(scorings.len());
+     for i in 0..scorings.len() {
+         scorings[i].invert();
+@@ -89,7 +96,12 @@ fn proposals_from_scorings(
+             !result.iter().any(|r: &ResultArtwork| r.id() == a.id())
+                 && !taboo.iter().any(|r: &&Artwork| r.id() == a.id())
+         }) {
+-            result.push(ResultArtwork::from(((*a).clone(), tags[i].to_string())));
++            result.push(ResultArtwork::from_artwork(
++                (*a).clone(),
++                tags[i].to_string(),
++                &emotions,
++                &types_of_object,
++            ));
+         }
+         scorings[i].invert();
+     }
+diff --git a/src/types_of_object.rs b/src/types_of_object.rs
+new file mode 100644
+index 0000000..af0cbd3
+--- /dev/null
++++ b/src/types_of_object.rs
+@@ -0,0 +1,57 @@
++use crate::{common::InternationalizedString, database::{self, Query}};
++use anyhow::Result;
++use sqlite::Row;
++
++const READ_QUERY: &str = "SELECT id, name_en, name_fr, name_nl FROM types_of_object";
++
++/// A type of object, translated in the 3 supported languages.
++#[derive(Clone)]
++pub struct TypeOfObject {
++    id: i64,
++    name: InternationalizedString,
++}
++
++impl TypeOfObject {
++    pub fn id(&self) -> i64 {
++        self.id
++    }
++
++    pub fn name(&self) -> &InternationalizedString {
++        &self.name
++    }
++}
++
++/// The set of object types.
++pub struct TypesOfObject(Vec<TypeOfObject>);
++
++impl From<Vec<TypeOfObject>> for TypesOfObject {
++    fn from(value: Vec<TypeOfObject>) -> Self {
++        TypesOfObject(value)
++    }
++}
++
++impl TypesOfObject {
++    /// Returns all the types of object.
++    pub fn read_all() -> Result<Self> {
++        let query = Query::new(READ_QUERY, &Self::map_row);
++        query.execute().map(|r| r.into())
++    }
++
++    pub fn iter(&self) -> impl Iterator<Item = &TypeOfObject> + '_ {
++        self.0.iter()
++    }
++
++    fn map_row(row: Row) -> TypeOfObject {
++        TypeOfObject {
++            id: <i64 as database::MapRowField<i64>>::read(&row, "id"),
++            name: InternationalizedString::new(
++                <Option<String> as database::MapRowField<Option<String>>>::read(&row, "name_en")
++                    .unwrap_or_default(),
++                <Option<String> as database::MapRowField<Option<String>>>::read(&row, "name_fr")
++                    .unwrap_or_default(),
++                <Option<String> as database::MapRowField<Option<String>>>::read(&row, "name_nl")
++                    .unwrap_or_default(),
++            ),
++        }
++    }
++}
+-- 
+2.50.1 (Apple Git-155)
+

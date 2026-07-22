@@ -1,0 +1,63 @@
+From 02f93e01cbb955ad8402ce171a25a5c8ccb99874 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Fri, 17 Jul 2026 21:31:40 +0200
+Subject: [PATCH 09/17] Serialize question content as {en,fr,nl}
+
+Mirrors the artworks title/description i18n pattern. content_en/fr/nl
+were populated in the DB but never read; non-English sessions saw
+whatever single language happened to be in the plain content column.
+---
+ src/questions.rs | 23 +++++++++++++++++++----
+ 1 file changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/src/questions.rs b/src/questions.rs
+index 623c354..5080ac8 100755
+--- a/src/questions.rs
++++ b/src/questions.rs
+@@ -1,4 +1,7 @@
+-use crate::database::{self, Query};
++use crate::{
++    common::InternationalizedString,
++    database::{self, Query},
++};
+ use anyhow::Result;
+ use serde::Serialize;
+ use sqlite::Row;
+@@ -7,7 +10,7 @@ use sqlite::Row;
+ #[derive(Clone, Serialize)]
+ pub struct Question {
+     id: i64,
+-    content: String,
++    content: InternationalizedString,
+ }
+ 
+ /// A set of questions.
+@@ -44,11 +47,23 @@ impl Questions {
+     /// Returns all the question.
+     pub fn read_all() -> Result<Self> {
+         let query = Query::new(
+-            "SELECT id, content FROM questions ORDER BY id",
++            "SELECT id, content_en, content_fr, content_nl FROM questions ORDER BY id",
+             &Self::map_row,
+         );
+         query.execute().map(|r| r.into())
+     }
+ 
+-    database::map_row!(Question, id: i64, content: String);
++    fn map_row(row: Row) -> Question {
++        Question {
++            id: <i64 as database::MapRowField<i64>>::read(&row, "id"),
++            content: InternationalizedString::new(
++                <Option<String> as database::MapRowField<Option<String>>>::read(&row, "content_en")
++                    .unwrap_or_default(),
++                <Option<String> as database::MapRowField<Option<String>>>::read(&row, "content_fr")
++                    .unwrap_or_default(),
++                <Option<String> as database::MapRowField<Option<String>>>::read(&row, "content_nl")
++                    .unwrap_or_default(),
++            ),
++        }
++    }
+ }
+-- 
+2.50.1 (Apple Git-155)
+

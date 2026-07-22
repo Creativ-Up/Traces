@@ -1,0 +1,26 @@
+From b151c835e8460991c28344bdd697887f85d4f192 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Tue, 21 Jul 2026 13:57:49 +0200
+Subject: [PATCH 14/17] Raise bit-image max width from 256 to 576 dots
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ src/print.rs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/print.rs b/src/print.rs
+index 217fffe..e9c0670 100755
+--- a/src/print.rs
++++ b/src/print.rs
+@@ -21,7 +21,7 @@ impl LocalPrinter {
+             .init()?
+             .bit_image_option(
+                 path,
+-                BitImageOption::new(Some(256), None, BitImageSize::Normal)?,
++                BitImageOption::new(Some(576), None, BitImageSize::Normal)?,
+             )?
+             .feed()?
+             .print_cut()?;
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,360 @@
+From 47406d43aa2fdf937d0492e4e0d608e616ec4b7a Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Tue, 21 Jul 2026 15:02:27 +0200
+Subject: [PATCH 15/17] Add POST /summary: generate end-of-session ticket text
+ via Ollama
+
+Calls the local gemma4:e4b model through Ollama's OpenAI-compatible API
+using the artworks/testimonies the frontend already has client-side, then
+stores the result in summaries.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ Cargo.lock       |   1 +
+ Cargo.toml       |   1 +
+ src/main.rs      |  46 +++++++++++++-
+ src/ollama.rs    | 155 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/summaries.rs |  46 ++++++++++++++
+ 5 files changed, 248 insertions(+), 1 deletion(-)
+ create mode 100644 src/ollama.rs
+ create mode 100644 src/summaries.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 2f84678..44e2560 100755
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2605,6 +2605,7 @@ dependencies = [
+  "anyhow",
+  "escpos",
+  "qwen3-asr",
++ "reqwest",
+  "rocket",
+  "serde",
+  "sqlite",
+diff --git a/Cargo.toml b/Cargo.toml
+index d6608b2..3947c7d 100755
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,6 +9,7 @@ escpos = { version = "0.19.0", features = ["full"] }
+ qwen3-asr = { version = "0.2", features = ["hub"] } # MacOS with Metal
+ # qwen3-asr = { version = "0.2", default-features = false, features = ["cuda", "hub"] } # CUDA
+ # qwen3-asr = { version = "0.2", default-features = false, features = ["hub"] } # CPU only
++reqwest = { version = "0.12", features = ["json"] }
+ rocket = {version = "0.5.1", features = ["json", "tls"]}
+ serde = { version = "1.0.228", features = ["derive"] }
+ sqlite = "0.37.0"
+diff --git a/src/main.rs b/src/main.rs
+index 6bfe70c..818a3af 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -2,17 +2,21 @@ mod artworks;
+ mod common;
+ mod database;
+ mod emotions;
++mod ollama;
+ mod print;
+ mod questions;
+ mod scoring;
++mod summaries;
+ mod testimonies;
+ mod transcription;
+ mod types_of_object;
+ 
+ use crate::{
+     artworks::{Artworks, ResultArtwork},
++    ollama::VisitedArtwork,
+     print::LocalPrinter,
+     questions::{Questions, QuestionsState},
++    summaries::Summary,
+     testimonies::Testimonies,
+     transcription::TranscriptionState,
+ };
+@@ -26,6 +30,7 @@ use rocket::{
+     launch, options, post, routes,
+     serde::json::Json,
+ };
++use serde::Deserialize;
+ 
+ const SERVER_PUBLIC_DIR_VAR: &str = "SERVER_PUBLIC_DIR_VAR";
+ 
+@@ -141,6 +146,37 @@ async fn print_png_route(data: Data<'_>) -> Result<(), ErrorResponse> {
+     Ok(())
+ }
+ 
++#[derive(Deserialize)]
++struct SummaryRequest {
++    visitor_id: String,
++    lang: String,
++    artworks: Vec<VisitedArtwork>,
++}
++
++// The frontend already has everything needed for the prompt (visited artworks, each with
++// its own optional testimony, and the session language) — the backend's only jobs are
++// calling Ollama and storing the result.
++#[post("/summary", format = "json", data = "<request>")]
++async fn summary_route(request: Json<SummaryRequest>) -> Result<Json<Summary>, ErrorResponse> {
++    let SummaryRequest {
++        visitor_id,
++        lang,
++        artworks,
++    } = request.into_inner();
++
++    let content = ollama::generate_summary(&lang, &artworks)
++        .await
++        .map_err(|e| ErrorResponse {
++            error_msg: format!("{e:?}"),
++        })?;
++
++    Summary::store(visitor_id, content)
++        .map(Json)
++        .map_err(|e| ErrorResponse {
++            error_msg: format!("{e:?}"),
++        })
++}
++
+ struct Cors;
+ 
+ #[rocket::async_trait]
+@@ -166,10 +202,17 @@ impl Fairing for Cors {
+ }
+ 
+ #[launch]
+-fn rocket() -> _ {
++async fn rocket() -> _ {
+     Questions::read_all().expect("cannot read questions");
+     Artworks::read_all().expect("cannot read artworks");
+     Testimonies::read_all().expect("cannot read testimonies");
++    // Ollama runs as its own persistent background service (started by its installer,
++    // not something this server manages) — a summary request will fail loudly on its own
++    // if it's down, but we also check once at boot so a misconfigured setup is obvious
++    // immediately rather than only surfacing at the first visitor's end screen.
++    if let Err(e) = ollama::check_reachable().await {
++        eprintln!("warning: {e:?}");
++    }
+     let mut r = rocket::build()
+         .manage(QuestionsState::default())
+         .manage(TranscriptionState::default())
+@@ -185,6 +228,7 @@ fn rocket() -> _ {
+                 transcript_route,
+                 new_testimony_route,
+                 print_png_route,
++                summary_route,
+             ],
+         );
+     if let Ok(dir) = std::env::var(SERVER_PUBLIC_DIR_VAR) {
+diff --git a/src/ollama.rs b/src/ollama.rs
+new file mode 100644
+index 0000000..ac4f7bf
+--- /dev/null
++++ b/src/ollama.rs
+@@ -0,0 +1,155 @@
++use anyhow::{Context, Result, anyhow};
++use serde::{Deserialize, Serialize};
++
++const BASE_URL: &str = "http://localhost:11434";
++const MODEL: &str = "gemma4:e4b";
++
++const SYSTEM_PROMPT: &str = "Rôle et contexte :
++Tu es le guide du parcours « TRACES », une exposition sur les souvenirs
++d'enfance entre Mons, Lens et Courtrai. À la fin de la visite, tu rédiges un
++court récit personnalisé résumant le parcours du visiteur, qui sera imprimé
++sur un ticket souvenir.
++
++Données d'entrée :
++Tu reçois la langue de session, la liste des œuvres explorées (type d'objet
++et description), et parfois le témoignage laissé par le visiteur.
++
++Instructions :
++- Synthétise le parcours : ne fais pas une simple liste des œuvres.
++  Identifie le fil conducteur, l'ambiance ou les thèmes qui les relient,
++  comme les étapes d'un voyage.
++- Évoque 2 à 3 œuvres par ce qu'elles montrent (l'enfant de marbre perdu
++  dans ses pensées, le billet plié en deux...). Les œuvres n'ont pas de
++  titre : n'en invente jamais, et ne mentionne aucun numéro d'inventaire.
++- Si un témoignage du visiteur est fourni, fais-y écho avec délicatesse,
++  sans le citer intégralement ni le déformer.
++- Adresse-toi directement au visiteur et remercie-le de sa visite. En
++  français, vouvoie (« vous ») ; en néerlandais, utilise « u ».
++- Ton inspirant, poétique et chaleureux, mais sobre : pas d'emphase
++  excessive.
++- Ne mentionne aucune donnée personnelle (nom, âge, origine...).
++
++Contraintes strictes :
++- Réponds UNIQUEMENT dans la langue de session indiquée.
++- 100 mots maximum. Sois concis et percutant.
++- Texte brut uniquement : pas de markdown, pas de titre, pas d'emoji,
++  pas de liste.";
++
++/// One artwork the visitor viewed, as sent by the frontend (already resolved
++/// client-side, so the backend does no artwork lookups of its own — see
++/// `Session.trace` on the frontend). `testimony` is the visitor's own transcript
++/// for this specific artwork, if they left one — a visitor can leave one per
++/// artwork, not just one for the whole session.
++#[derive(Deserialize)]
++pub struct VisitedArtwork {
++    pub type_of_object: String,
++    pub description: String,
++    pub testimony: Option<String>,
++}
++
++fn build_user_prompt(lang: &str, artworks: &[VisitedArtwork]) -> String {
++    let mut prompt = format!("Langue de session : {lang}\n");
++    for artwork in artworks {
++        prompt.push_str(&format!(
++            "Œuvres vues pendant la visite : {} - {}\n",
++            artwork.type_of_object, artwork.description
++        ));
++        if let Some(testimony) = artwork.testimony.as_deref().filter(|t| !t.is_empty()) {
++            prompt.push_str(&format!(
++                "Témoignage laissé par le visiteur (optionnel) : « {testimony} »\n"
++            ));
++        }
++    }
++    prompt.push_str("Rédige le texte du ticket.");
++    prompt
++}
++
++#[derive(Serialize)]
++struct ChatMessage {
++    role: &'static str,
++    content: String,
++}
++
++#[derive(Serialize)]
++struct ChatRequest {
++    model: &'static str,
++    temperature: f32,
++    top_p: f32,
++    top_k: u32,
++    max_tokens: u32,
++    messages: Vec<ChatMessage>,
++}
++
++#[derive(Deserialize)]
++struct ChatResponse {
++    choices: Vec<ChatChoice>,
++}
++
++#[derive(Deserialize)]
++struct ChatChoice {
++    message: ChatResponseMessage,
++}
++
++#[derive(Deserialize)]
++struct ChatResponseMessage {
++    content: String,
++}
++
++/// Checks that Ollama is reachable, without loading a model. Called once at server startup
++/// so a misconfigured/not-running Ollama is reported clearly instead of failing silently
++/// the first time a visitor reaches the end screen.
++pub async fn check_reachable() -> Result<()> {
++    reqwest::get(BASE_URL)
++        .await
++        .context("Ollama not reachable at http://localhost:11434 — is `ollama serve` running?")?;
++    Ok(())
++}
++
++/// Generates the ticket summary text for a visitor's session via Ollama's
++/// OpenAI-compatible /v1/chat/completions endpoint, using the recommended Gemma4 params.
++pub async fn generate_summary(lang: &str, artworks: &[VisitedArtwork]) -> Result<String> {
++    let user_prompt = build_user_prompt(lang, artworks);
++
++    let request = ChatRequest {
++        model: MODEL,
++        temperature: 1.0,
++        top_p: 0.95,
++        top_k: 64,
++        // gemma4:e4b is a reasoning model: it spends output tokens on an internal
++        // `reasoning` field before writing `content`, and `think: false` doesn't suppress
++        // this (tested directly against Ollama). 350 — the actual target length per the
++        // system prompt's "100 mots maximum" — was getting consumed entirely by reasoning,
++        // leaving nothing for the real answer (finish_reason: "length", empty content).
++        // The final answer's length is still bounded by the prompt, not by this cap.
++        max_tokens: 1500,
++        messages: vec![
++            ChatMessage {
++                role: "system",
++                content: SYSTEM_PROMPT.to_string(),
++            },
++            ChatMessage {
++                role: "user",
++                content: user_prompt,
++            },
++        ],
++    };
++
++    let response = reqwest::Client::new()
++        .post(format!("{BASE_URL}/v1/chat/completions"))
++        .json(&request)
++        .send()
++        .await
++        .context("while calling Ollama")?
++        .error_for_status()
++        .context("Ollama returned an error status")?
++        .json::<ChatResponse>()
++        .await
++        .context("while parsing Ollama's response")?;
++
++    response
++        .choices
++        .into_iter()
++        .next()
++        .map(|choice| choice.message.content)
++        .ok_or_else(|| anyhow!("Ollama returned no choices"))
++}
+diff --git a/src/summaries.rs b/src/summaries.rs
+new file mode 100644
+index 0000000..3b75c63
+--- /dev/null
++++ b/src/summaries.rs
+@@ -0,0 +1,46 @@
++use crate::database::{Query, map_row};
++use anyhow::Result;
++use serde::Serialize;
++use sqlite::Row;
++
++const READ_QUERY: &str = "SELECT id, visitor_id, content, created_at FROM summaries";
++
++/// An end-of-session LLM-generated ticket summary, 1:1 with a visitor.
++#[derive(Clone, Serialize)]
++pub struct Summary {
++    id: i64,
++    visitor_id: String,
++    content: String,
++    created_at: String,
++}
++
++map_row!(Summary, id: i64, visitor_id: String, content: String, created_at: String);
++
++impl Summary {
++    /// Stores `content` as the summary for `visitor_id`, replacing any existing summary for
++    /// that visitor (`summaries.visitor_id` is UNIQUE — one summary per session).
++    ///
++    /// The matching `visitors` row is created here if it doesn't exist yet, same upsert-guard
++    /// as `Testimonies::new_testimony`.
++    pub fn store(visitor_id: String, content: String) -> Result<Self> {
++        let mut visitor_query = Query::new("INSERT OR IGNORE INTO visitors(id) VALUES (:id)", &|_row| ());
++        visitor_query.set_bindings(vec![(":id", visitor_id.clone().into())]);
++        visitor_query.execute()?;
++
++        let mut insert_query = Query::new(
++            "INSERT INTO summaries(visitor_id, content) VALUES (:visitor_id, :content) \
++             ON CONFLICT(visitor_id) DO UPDATE SET content = excluded.content, created_at = datetime('now') \
++             RETURNING *",
++            &map_row,
++        );
++        insert_query.set_bindings(vec![
++            (":visitor_id", visitor_id.into()),
++            (":content", content.into()),
++        ]);
++        insert_query
++            .execute()?
++            .into_iter()
++            .next()
++            .ok_or_else(|| anyhow::anyhow!("insert into summaries returned no row"))
++    }
++}
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,106 @@
+From e97f15cda613ff5b417e22f6fbde76cf29df38f5 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Tue, 21 Jul 2026 18:10:05 +0200
+Subject: [PATCH 17/17] Serve the frontend at / and namespace API routes under
+ /api
+
+Mounts the built frontend (SERVER_FRONTEND_DIR_VAR) at the root, with a
+fallback route resolving extensionless paths like /moderation to
+moderation.html. Artwork images (SERVER_ASSETS_DIR_VAR) get their own
+/assets mount, ranked ahead of the frontend's catch-all. Existing routes
+move under /api to avoid colliding with the new root-mounted frontend.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ src/main.rs | 44 ++++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 38 insertions(+), 6 deletions(-)
+
+diff --git a/src/main.rs b/src/main.rs
+index 6bf78a2..d9980b2 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -25,15 +25,17 @@ use rocket::{
+     Request, Responder, Response, State,
+     data::{Capped, Data, ToByteUnit},
+     fairing::{Fairing, Info, Kind},
+-    fs::FileServer,
++    fs::{FileServer, NamedFile},
+     get,
+     http::Header,
+     launch, options, patch, post, routes,
+     serde::json::Json,
+ };
+ use serde::Deserialize;
++use std::path::PathBuf;
+ 
+-const SERVER_PUBLIC_DIR_VAR: &str = "SERVER_PUBLIC_DIR_VAR";
++const SERVER_FRONTEND_DIR_VAR: &str = "SERVER_FRONTEND_DIR_VAR";
++const SERVER_ASSETS_DIR_VAR: &str = "SERVER_ASSETS_DIR_VAR";
+ 
+ #[derive(Responder)]
+ #[response(status = 500, content_type = "json")]
+@@ -203,6 +205,24 @@ async fn summary_route(request: Json<SummaryRequest>) -> Result<Json<Summary>, E
+         })
+ }
+ 
++// Falls back to `<path>.html` when the frontend FileServer (mounted at "/", rank 11)
++// doesn't find an exact match — lets e.g. /moderation resolve to moderation.html, so the
++// built frontend's multiple HTML entries don't need their extension typed out. Lower rank
++// number in Rocket means higher priority, so this must rank after FileServer's rank 11;
++// anything looking like a file (has a '.') or an API call is left alone.
++#[get("/<path..>", rank = 20)]
++async fn html_fallback_route(path: PathBuf) -> Option<NamedFile> {
++    let dir = std::env::var(SERVER_FRONTEND_DIR_VAR).ok()?;
++    if path.extension().is_some() {
++        return None;
++    }
++    let mut with_extension = path;
++    with_extension.set_extension("html");
++    NamedFile::open(std::path::Path::new(&dir).join(with_extension))
++        .await
++        .ok()
++}
++
+ struct Cors;
+ 
+ #[rocket::async_trait]
+@@ -243,11 +263,14 @@ async fn rocket() -> _ {
+         .manage(QuestionsState::default())
+         .manage(TranscriptionState::default())
+         .attach(Cors)
++        // The CORS preflight catch-all must cover the whole server, not just /api, since
++        // the built frontend served below is also fetched cross-origin during development
++        // (Vite dev server on a different port than this backend).
++        .mount("/", routes![options_route])
+         .mount(
+-            "/",
++            "/api",
+             routes![
+                 index_route,
+-                options_route,
+                 questions_route,
+                 artworks_question_route,
+                 testimonies_route,
+@@ -259,8 +282,17 @@ async fn rocket() -> _ {
+                 summary_route,
+             ],
+         );
+-    if let Ok(dir) = std::env::var(SERVER_PUBLIC_DIR_VAR) {
+-        r = r.mount("/public", FileServer::from(dir));
++    if let Ok(dir) = std::env::var(SERVER_FRONTEND_DIR_VAR) {
++        // Ranked after the assets FileServer below (default rank 10) so an explicit
++        // /assets/<path..> mount wins that prefix outright — both would otherwise
++        // ambiguously match the same requests at the same default rank and Rocket
++        // refuses to launch.
++        r = r
++            .mount("/", FileServer::from(dir).rank(11))
++            .mount("/", routes![html_fallback_route]);
++    }
++    if let Ok(dir) = std::env::var(SERVER_ASSETS_DIR_VAR) {
++        r = r.mount("/assets", FileServer::from(dir));
+     }
+     r
+ }
+-- 
+2.50.1 (Apple Git-155)
+

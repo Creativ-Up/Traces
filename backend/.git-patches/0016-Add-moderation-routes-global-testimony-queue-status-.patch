@@ -1,0 +1,169 @@
+From a57fb4994137bb46dda67418e19c93095ddccb76 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Tue, 21 Jul 2026 15:48:18 +0200
+Subject: [PATCH 16/17] Add moderation routes: global testimony queue + status
+ update
+
+GET /testimonies/all exposes Testimonies::read_all() (previously only used
+as a launch-time sanity check), and PATCH /testimony/<id> validates/censors
+one. No individual staff-identity concept exists yet, so moderated_by is
+attributed to a pseudo-staff row per kiosk city (src/staff.rs).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ src/main.rs        | 30 +++++++++++++++++++++++++++++-
+ src/staff.rs       | 39 +++++++++++++++++++++++++++++++++++++++
+ src/testimonies.rs | 27 +++++++++++++++++++++++++--
+ 3 files changed, 93 insertions(+), 3 deletions(-)
+ create mode 100644 src/staff.rs
+
+diff --git a/src/main.rs b/src/main.rs
+index 818a3af..6bf78a2 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -6,6 +6,7 @@ mod ollama;
+ mod print;
+ mod questions;
+ mod scoring;
++mod staff;
+ mod summaries;
+ mod testimonies;
+ mod transcription;
+@@ -27,7 +28,7 @@ use rocket::{
+     fs::FileServer,
+     get,
+     http::Header,
+-    launch, options, post, routes,
++    launch, options, patch, post, routes,
+     serde::json::Json,
+ };
+ use serde::Deserialize;
+@@ -94,6 +95,31 @@ fn testimonies_route(a: usize) -> Result<Json<Testimonies>, ErrorResponse> {
+         })
+ }
+ 
++// Global moderation queue: every testimony across every artwork, any status — unlike
++// GET /testimonies, no server-side status filtering (moderators need to see validated/
++// censored testimonies too, e.g. to re-censor one that was validated by mistake).
++#[get("/testimonies/all")]
++fn testimonies_all_route() -> Result<Json<Testimonies>, ErrorResponse> {
++    Testimonies::read_all().map(Json).map_err(|e| ErrorResponse {
++        error_msg: format!("{e:?}"),
++    })
++}
++
++// `city` is the moderating kiosk's location id — stands in for an individual moderator's
++// identity until a real staff-identity concept exists (see staff::resolve_kiosk_id).
++#[patch("/testimony/<id>?<status>&<city>")]
++fn moderate_testimony_route(
++    id: i64,
++    status: &str,
++    city: &str,
++) -> Result<Json<Testimonies>, ErrorResponse> {
++    Testimonies::update_status(id, status, city)
++        .map(Json)
++        .map_err(|e| ErrorResponse {
++            error_msg: format!("{e:?}"),
++        })
++}
++
+ #[post("/transcript", format = "audio/wav", data = "<data>")]
+ async fn transcript_route(
+     data: Data<'_>,
+@@ -225,6 +251,8 @@ async fn rocket() -> _ {
+                 questions_route,
+                 artworks_question_route,
+                 testimonies_route,
++                testimonies_all_route,
++                moderate_testimony_route,
+                 transcript_route,
+                 new_testimony_route,
+                 print_png_route,
+diff --git a/src/staff.rs b/src/staff.rs
+new file mode 100644
+index 0000000..e42bba8
+--- /dev/null
++++ b/src/staff.rs
+@@ -0,0 +1,39 @@
++use crate::database::{self, Query};
++use anyhow::Result;
++
++const KIOSK_STAFF_NAME: &str = "Kiosk";
++const KIOSK_STAFF_ROLE: &str = "kiosk";
++
++/// Resolves `city` (a kiosk's location id, e.g. "tourcoing") to a `staff.id`, creating a
++/// pseudo-staff row for it if one doesn't exist yet. Used as a stand-in `moderated_by` until
++/// a real staff-identity concept exists — moderation is attributed to "the kiosk at <city>"
++/// rather than an individual. `staff.city` has no UNIQUE constraint, so this reads first
++/// rather than relying on an upsert.
++pub fn resolve_kiosk_id(city: &str) -> Result<i64> {
++    let mut find_query = Query::new(
++        "SELECT id FROM staff WHERE city = :city AND role = :role LIMIT 1",
++        &|row| <i64 as database::MapRowField<i64>>::read(&row, "id"),
++    );
++    find_query.set_bindings(vec![
++        (":city", city.into()),
++        (":role", KIOSK_STAFF_ROLE.into()),
++    ]);
++    if let Some(id) = find_query.execute()?.into_iter().next() {
++        return Ok(id);
++    }
++
++    let mut insert_query = Query::new(
++        "INSERT INTO staff(name, city, role) VALUES (:name, :city, :role) RETURNING id",
++        &|row| <i64 as database::MapRowField<i64>>::read(&row, "id"),
++    );
++    insert_query.set_bindings(vec![
++        (":name", KIOSK_STAFF_NAME.into()),
++        (":city", city.into()),
++        (":role", KIOSK_STAFF_ROLE.into()),
++    ]);
++    insert_query
++        .execute()?
++        .into_iter()
++        .next()
++        .ok_or_else(|| anyhow::anyhow!("insert into staff returned no row"))
++}
+diff --git a/src/testimonies.rs b/src/testimonies.rs
+index 6c3352a..87a8dc7 100755
+--- a/src/testimonies.rs
++++ b/src/testimonies.rs
+@@ -1,5 +1,5 @@
+-use crate::database::{self, Query};
+-use anyhow::Result;
++use crate::{database::{self, Query}, staff};
++use anyhow::{Result, bail};
+ use serde::Serialize;
+ use sqlite::{Row, Value};
+ 
+@@ -199,4 +199,27 @@ impl Testimonies {
+         ]);
+         insert_query.execute().map(|r| r.into())
+     }
++
++    /// Moderates a testimony: sets its status (`validated` or `censored`), `moderated_at`
++    /// to now, and `moderated_by` to the pseudo-staff row for `moderator_city` (see
++    /// `staff::resolve_kiosk_id` — no individual staff-identity concept exists yet, so
++    /// moderation is attributed to "the kiosk at <city>").
++    pub fn update_status(id: i64, status: &str, moderator_city: &str) -> Result<Self> {
++        if status != "validated" && status != "censored" {
++            bail!("invalid status {status:?}: must be \"validated\" or \"censored\"");
++        }
++        let moderated_by = staff::resolve_kiosk_id(moderator_city)?;
++
++        let mut query = Query::new(
++            "UPDATE testimonies SET status = :status, moderated_at = datetime('now'), moderated_by = :moderated_by \
++             WHERE id = :id RETURNING *",
++            &Self::map_row,
++        );
++        query.set_bindings(vec![
++            (":status", status.into()),
++            (":moderated_by", moderated_by.into()),
++            (":id", id.into()),
++        ]);
++        query.execute().map(|r| r.into())
++    }
+ }
+-- 
+2.50.1 (Apple Git-155)
+

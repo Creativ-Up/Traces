@@ -1,0 +1,155 @@
+From 6bfae556d6a49c738550939835950062a527aa4d Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Thu, 16 Jul 2026 14:26:54 +0200
+Subject: [PATCH 06/17] Add location_id to testimonies, stamped by client at
+ submission
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+XXX[back]: traces client (Testimony.jsx location_id prop, resolved via
+I18N('location.' + id)) needs the recording machine's physical location
+attached to each new testimony. This is not visitor input — the client
+is meant to stamp it from its own local config at submission time.
+
+Adds a nullable location_id TEXT column to testimonies (existing rows
+get NULL), threads it through Testimony/RawTestimony, and accepts it
+as an optional `l` query param on POST /testimony. The traces client
+does not send this param yet (API.js#pushTestimony has no such key),
+so submissions will keep getting location_id: null until that lands.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ pp1_collection.db  | Bin 1613824 -> 1613824 bytes
+ src/main.rs        |  16 +++++++++++++---
+ src/testimonies.rs |  30 +++++++++++++++++++++++++++---
+ 3 files changed, 40 insertions(+), 6 deletions(-)
+
+diff --git a/pp1_collection.db b/pp1_collection.db
+index 208acb4bae5e0c25934b822d6a4e8ccd3e451451..93ef6ba2fd86588e761fb24f09be38eb7044a7e0 100755
+GIT binary patch
+delta 220
+zcmWN>KMMh290%~<<L;dQJpM;Y$)I$L)!-&0??AZaN-Sn6gP3q-^9oGYla!Qu2WAtK
+z(&fAb-{JF_JA=71*c5q*h^-+@2nySJLn)CqzSzd$$%98y$tC|xvEuibPOg=FJwmH$
+zRLxZ?Y{$jv)0QIT(PY@4nv-$QG^~S^x4J(~G`|WH9jC^`_5Jh7MDkwn)=pmN-ct7%
+l_&@>~6!3!z0SH0}!VrNd#2^j{;E;qAq#*;@v+m_?_8)*}QjGur
+
+delta 199
+zcmZoTkkoJ>X@az%3<CpW7Z8gv00|(LoTy{WD#M`H`)gy$-1~w+5q8$e3~Y6*lljl{
+zIdZO^EcD>!c7ra)6)c<m4`?!O-t+7|6IZ7&FT1$1GULSD&0in5Gf&Ro7TTQf#F(+!
+z@m;&)J4PU80%B$$W&vVWAZ7z%b|B^eVoo6D0%C3;<^f_}Am#&NejpYAVnHAl0%Bnx
+R76D>WAQs#1_)dKPMgRZ=OLhPN
+
+diff --git a/src/main.rs b/src/main.rs
+index ca1a3c7..83e01ab 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -99,9 +99,19 @@ async fn transcript_route(
+     })
+ }
+ 
+-#[post("/testimony?<a>", format = "plain", data = "<data>")]
+-fn new_testimony_route(a: usize, data: String) -> Result<Json<Testimonies>, ErrorResponse> {
+-    Testimonies::new_testimony(a as i64, data)
++// XXX[back] `l` (location_id) is a new, optional query param: the id of the recording
++// machine's physical location, stamped by the client from its own config (not visitor
++// input). See traces client repo, src/components/Testimony.jsx and
++// data/mock-api-responses.js XXX[back] on `location`/LOCATION_IDS. The client does not
++// send it yet (src/controllers/API.js#pushTestimony has no such param); until it does,
++// this defaults to None and existing/new rows alike get location_id: null.
++#[post("/testimony?<a>&<l>", format = "plain", data = "<data>")]
++fn new_testimony_route(
++    a: usize,
++    l: Option<String>,
++    data: String,
++) -> Result<Json<Testimonies>, ErrorResponse> {
++    Testimonies::new_testimony(a as i64, data, l)
+         .map(Json)
+         .map_err(|e| ErrorResponse {
+             error_msg: format!("{e:?}"),
+diff --git a/src/testimonies.rs b/src/testimonies.rs
+index aab87fe..3ed1bee 100755
+--- a/src/testimonies.rs
++++ b/src/testimonies.rs
+@@ -3,7 +3,7 @@ use anyhow::Result;
+ use serde::Serialize;
+ use sqlite::{Row, Value};
+ 
+-const READ_QUERY: &str = "SELECT id, visitor_id, artwork_id, content, source_lang, content_fr, content_nl, content_en, status, consent_given, created_at, moderated_at, moderated_by FROM testimonies";
++const READ_QUERY: &str = "SELECT id, visitor_id, artwork_id, content, source_lang, content_fr, content_nl, content_en, location_id, status, consent_given, created_at, moderated_at, moderated_by FROM testimonies";
+ 
+ /// A testimony.
+ ///
+@@ -23,6 +23,13 @@ pub struct Testimony {
+     content: InternationalizedTestimony,
+     // Original recording language: 'fr', 'nl', or 'en'. Null until moderation sets it.
+     lang: Option<String>,
++    // XXX[back] new column: id of the recording machine's physical location (e.g.
++    // 'le_fresnoy', 'abby', 'mons'), stamped from the client's own config at submission
++    // time — not a value the visitor enters. See traces client repo, src/components/
++    // Testimony.jsx (location_id prop, resolved via I18N('location.' + id)) and
++    // data/mock-api-responses.js XXX[back] above LOCATION_IDS. Existing testimonies
++    // predating this column have location_id: null.
++    location_id: Option<String>,
+     // 'pending', 'validated', or 'censored'
+     status: String,
+     consent_given: bool,
+@@ -50,6 +57,7 @@ struct RawTestimony {
+     content_fr: Option<String>,
+     content_nl: Option<String>,
+     content_en: Option<String>,
++    location_id: Option<String>,
+     status: String,
+     consent_given: bool,
+     created_at: String,
+@@ -78,6 +86,7 @@ impl From<RawTestimony> for Testimony {
+             artwork_id: raw.artwork_id,
+             content,
+             lang: raw.source_lang,
++            location_id: raw.location_id,
+             status: raw.status,
+             consent_given: raw.consent_given,
+             created_at: raw.created_at,
+@@ -139,6 +148,10 @@ impl Testimonies {
+                 &row,
+                 "content_en",
+             ),
++            location_id: <Option<String> as database::MapRowField<Option<String>>>::read(
++                &row,
++                "location_id",
++            ),
+             status: <String as database::MapRowField<String>>::read(&row, "status"),
+             consent_given: <bool as database::MapRowField<bool>>::read(&row, "consent_given"),
+             created_at: <String as database::MapRowField<String>>::read(&row, "created_at"),
+@@ -155,15 +168,26 @@ impl Testimonies {
+     }
+ 
+     /// Inserts a new testimony, returning it as a list of testimonies containing a single element.
+-    pub fn new_testimony(artwork_id: i64, content: String) -> Result<Self> {
++    ///
++    /// `location_id` identifies the recording machine's physical location (stamped by the
++    /// client from its own config, e.g. 'le_fresnoy', 'abby', 'mons') — not visitor input.
++    pub fn new_testimony(
++        artwork_id: i64,
++        content: String,
++        location_id: Option<String>,
++    ) -> Result<Self> {
+         let mut insert_query = Query::new(
+-            "INSERT INTO Testimonies(visitor_id, artwork_id, content, consent_given, moderated_at, moderated_by) VALUES (:visitor_id, :artwork_id, :content, :consent_given, :moderated_at, :moderated_by) RETURNING *",
++            "INSERT INTO Testimonies(visitor_id, artwork_id, content, location_id, consent_given, moderated_at, moderated_by) VALUES (:visitor_id, :artwork_id, :content, :location_id, :consent_given, :moderated_at, :moderated_by) RETURNING *",
+             &Self::map_row,
+         );
+         insert_query.set_bindings(vec![
+             (":visitor_id", Value::Null),
+             (":artwork_id", artwork_id.into()),
+             (":content", content.into()),
++            (
++                ":location_id",
++                location_id.map(Value::from).unwrap_or(Value::Null),
++            ),
+             (":consent_given", 1.into()),
+             (":moderated_at", Value::Null),
+             (":moderated_by", Value::Null),
+-- 
+2.50.1 (Apple Git-155)
+

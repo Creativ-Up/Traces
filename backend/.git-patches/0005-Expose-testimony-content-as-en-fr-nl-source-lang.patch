@@ -1,0 +1,176 @@
+From f59f65ddb7c7e6386fdb4b3502434d480bc9b1f1 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Thu, 16 Jul 2026 14:24:28 +0200
+Subject: [PATCH 05/17] Expose testimony content as {en,fr,nl} + source lang
+
+XXX[back]: traces client (Testimony.jsx, data/mock-api-responses.js)
+expects Testimony.content as an internationalized { en, fr, nl } object
+plus a lang field carrying the recording's source language, mirroring
+Artwork's description shape. The testimonies table already had
+source_lang/content_fr/content_nl/content_en columns (filled in during
+moderation) that this struct simply never read. Original recorded text
+is placed in its own language slot; other slots stay empty until
+translated by moderation.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ src/testimonies.rs | 122 +++++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 108 insertions(+), 14 deletions(-)
+
+diff --git a/src/testimonies.rs b/src/testimonies.rs
+index d3de7f9..aab87fe 100755
+--- a/src/testimonies.rs
++++ b/src/testimonies.rs
+@@ -3,15 +3,26 @@ use anyhow::Result;
+ use serde::Serialize;
+ use sqlite::{Row, Value};
+ 
+-const READ_QUERY: &str = "SELECT id, visitor_id, artwork_id, content, status, consent_given, created_at, moderated_at, moderated_by FROM testimonies";
++const READ_QUERY: &str = "SELECT id, visitor_id, artwork_id, content, source_lang, content_fr, content_nl, content_en, status, consent_given, created_at, moderated_at, moderated_by FROM testimonies";
+ 
+ /// A testimony.
++///
++/// XXX[back] `content` used to be serialized as a plain String (source-language text only).
++/// See traces client repo, data/mock-api-responses.js, XXX[back] above the `testimony`
++/// factory, and src/components/Testimony.jsx (content: Props.required(Props.object,
++/// Props.string) — the client expects { fr, en, nl } like Artwork's description/title.
++/// The testimonies table already has source_lang/content_fr/content_nl/content_en columns
++/// (filled in by moderation); this was just not read/exposed by this struct until now.
+ #[derive(Clone, Serialize)]
+ pub struct Testimony {
+     id: i64,
+     visitor_id: Option<String>,
+     artwork_id: i64,
+-    content: String,
++    /// Per-language content. Only `lang` (the original recording's language) is guaranteed
++    /// to be filled in before moderation; the others are empty strings until translated.
++    content: InternationalizedTestimony,
++    // Original recording language: 'fr', 'nl', or 'en'. Null until moderation sets it.
++    lang: Option<String>,
+     // 'pending', 'validated', or 'censored'
+     status: String,
+     consent_given: bool,
+@@ -20,6 +31,62 @@ pub struct Testimony {
+     moderated_by: Option<i64>,
+ }
+ 
++#[derive(Clone, Serialize)]
++pub struct InternationalizedTestimony {
++    en: String,
++    fr: String,
++    nl: String,
++}
++
++/// The raw row shape, before `content`/`source_lang`/`content_{en,fr,nl}` are merged into
++/// `Testimony::content` + `Testimony::lang` (see `Testimonies::map_row`).
++#[derive(Clone)]
++struct RawTestimony {
++    id: i64,
++    visitor_id: Option<String>,
++    artwork_id: i64,
++    content: String,
++    source_lang: Option<String>,
++    content_fr: Option<String>,
++    content_nl: Option<String>,
++    content_en: Option<String>,
++    status: String,
++    consent_given: bool,
++    created_at: String,
++    moderated_at: Option<String>,
++    moderated_by: Option<i64>,
++}
++
++impl From<RawTestimony> for Testimony {
++    fn from(raw: RawTestimony) -> Self {
++        // The original recording's text belongs in its own language slot; the other slots
++        // stay empty until moderation fills in content_{en,fr,nl}.
++        let mut content = InternationalizedTestimony {
++            en: raw.content_en.unwrap_or_default(),
++            fr: raw.content_fr.unwrap_or_default(),
++            nl: raw.content_nl.unwrap_or_default(),
++        };
++        match raw.source_lang.as_deref() {
++            Some("en") if content.en.is_empty() => content.en = raw.content.clone(),
++            Some("fr") if content.fr.is_empty() => content.fr = raw.content.clone(),
++            Some("nl") if content.nl.is_empty() => content.nl = raw.content.clone(),
++            _ => {}
++        }
++        Self {
++            id: raw.id,
++            visitor_id: raw.visitor_id,
++            artwork_id: raw.artwork_id,
++            content,
++            lang: raw.source_lang,
++            status: raw.status,
++            consent_given: raw.consent_given,
++            created_at: raw.created_at,
++            moderated_at: raw.moderated_at,
++            moderated_by: raw.moderated_by,
++        }
++    }
++}
++
+ /// A set of testimonies.
+ #[derive(Clone, Serialize)]
+ pub struct Testimonies(Vec<Testimony>);
+@@ -47,18 +114,45 @@ impl Testimonies {
+         query.execute().map(|r| r.into())
+     }
+ 
+-    database::map_row!(
+-        Testimony,
+-        id: i64,
+-        visitor_id: Option<String>,
+-        artwork_id: i64,
+-        content: String,
+-        status: String,
+-        consent_given: bool,
+-        created_at: String,
+-        moderated_at: Option<String>,
+-        moderated_by: Option<i64>
+-    );
++    fn map_row(row: Row) -> Testimony {
++        RawTestimony {
++            id: <i64 as database::MapRowField<i64>>::read(&row, "id"),
++            visitor_id: <Option<String> as database::MapRowField<Option<String>>>::read(
++                &row,
++                "visitor_id",
++            ),
++            artwork_id: <i64 as database::MapRowField<i64>>::read(&row, "artwork_id"),
++            content: <String as database::MapRowField<String>>::read(&row, "content"),
++            source_lang: <Option<String> as database::MapRowField<Option<String>>>::read(
++                &row,
++                "source_lang",
++            ),
++            content_fr: <Option<String> as database::MapRowField<Option<String>>>::read(
++                &row,
++                "content_fr",
++            ),
++            content_nl: <Option<String> as database::MapRowField<Option<String>>>::read(
++                &row,
++                "content_nl",
++            ),
++            content_en: <Option<String> as database::MapRowField<Option<String>>>::read(
++                &row,
++                "content_en",
++            ),
++            status: <String as database::MapRowField<String>>::read(&row, "status"),
++            consent_given: <bool as database::MapRowField<bool>>::read(&row, "consent_given"),
++            created_at: <String as database::MapRowField<String>>::read(&row, "created_at"),
++            moderated_at: <Option<String> as database::MapRowField<Option<String>>>::read(
++                &row,
++                "moderated_at",
++            ),
++            moderated_by: <Option<i64> as database::MapRowField<Option<i64>>>::read(
++                &row,
++                "moderated_by",
++            ),
++        }
++        .into()
++    }
+ 
+     /// Inserts a new testimony, returning it as a list of testimonies containing a single element.
+     pub fn new_testimony(artwork_id: i64, content: String) -> Result<Self> {
+-- 
+2.50.1 (Apple Git-155)
+

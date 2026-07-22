@@ -1,0 +1,86 @@
+From 9d9c9924b09e7a62859d273f4c00b20fc049ecc1 Mon Sep 17 00:00:00 2001
+From: Arnaud Juracek <arnaud.juracek@gmail.com>
+Date: Sat, 18 Jul 2026 00:22:07 +0200
+Subject: [PATCH 12/17] Wire visitor_id into testimony submission
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+POST /testimony now accepts v=<visitor_id> (Session.id on the
+frontend) and binds it to testimonies.visitor_id instead of hardcoding
+Value::Null. The matching visitors row is upserted (INSERT OR IGNORE)
+before the testimony insert, since a visitor session must exist before
+it can be referenced — safe as a plain upsert given one kiosk, one
+session at a time, no concurrent-id collisions to guard against.
+
+This also makes UNIQUE(visitor_id, artwork_id) live instead of a
+no-op (SQLite doesn't enforce uniqueness across multiple NULLs).
+---
+ src/main.rs        |  6 ++++--
+ src/testimonies.rs | 18 +++++++++++++++++-
+ 2 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/src/main.rs b/src/main.rs
+index 358295a..729a26b 100755
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -103,13 +103,15 @@ async fn transcript_route(
+ 
+ // `c` is the recording machine's location id, stamped by the client from its own config
+ // (not visitor input). Optional: defaults to None if the client doesn't send it.
+-#[post("/testimony?<a>&<c>", format = "plain", data = "<data>")]
++// `v` is the client's session id (Session.id on the frontend), used as visitors.id.
++#[post("/testimony?<a>&<c>&<v>", format = "plain", data = "<data>")]
+ fn new_testimony_route(
+     a: usize,
+     c: Option<String>,
++    v: Option<String>,
+     data: String,
+ ) -> Result<Json<Testimonies>, ErrorResponse> {
+-    Testimonies::new_testimony(a as i64, data, c)
++    Testimonies::new_testimony(a as i64, data, c, v)
+         .map(Json)
+         .map_err(|e| ErrorResponse {
+             error_msg: format!("{e:?}"),
+diff --git a/src/testimonies.rs b/src/testimonies.rs
+index a9bc6e9..6c3352a 100755
+--- a/src/testimonies.rs
++++ b/src/testimonies.rs
+@@ -160,17 +160,33 @@ impl Testimonies {
+     /// Inserts a new testimony, returning it as a list of testimonies containing a single element.
+     ///
+     /// `city` is the recording machine's location id, stamped by the client (not visitor input).
++    /// `visitor_id` is the client's session id (Session.id on the frontend); the matching
++    /// `visitors` row is created here if it doesn't exist yet (one kiosk, one session at a
++    /// time, so a plain upsert is enough — no concurrent-session id collisions to guard against).
+     pub fn new_testimony(
+         artwork_id: i64,
+         content: String,
+         city: Option<String>,
++        visitor_id: Option<String>,
+     ) -> Result<Self> {
++        if let Some(id) = &visitor_id {
++            let mut visitor_query = Query::new(
++                "INSERT OR IGNORE INTO visitors(id) VALUES (:id)",
++                &|_row| (),
++            );
++            visitor_query.set_bindings(vec![(":id", id.clone().into())]);
++            visitor_query.execute()?;
++        }
++
+         let mut insert_query = Query::new(
+             "INSERT INTO Testimonies(visitor_id, artwork_id, content, city, consent_given, moderated_at, moderated_by) VALUES (:visitor_id, :artwork_id, :content, :city, :consent_given, :moderated_at, :moderated_by) RETURNING *",
+             &Self::map_row,
+         );
+         insert_query.set_bindings(vec![
+-            (":visitor_id", Value::Null),
++            (
++                ":visitor_id",
++                visitor_id.map(Value::from).unwrap_or(Value::Null),
++            ),
+             (":artwork_id", artwork_id.into()),
+             (":content", content.into()),
+             (
+-- 
+2.50.1 (Apple Git-155)
+
