@@ -72,6 +72,22 @@ git pull
 Rien d'autre à faire : la DB est versionnée directement dans le repo. Pour les
 requêtes vectorielles, voir la section sqlite-vec ci-dessous.
 
+### Cas du kiosque
+
+Sur une machine kiosque, `pp1_collection.db` est modifiée en continu à
+l'exécution (visiteurs, témoignages, résumés) : un `git pull` brut écraserait
+ou entrerait en conflit avec ces écritures locales. Utiliser à la place :
+
+- `scripts/update.sh` — pull du monorepo en conservant la DB locale du
+  kiosque (elle est mise de côté puis restaurée après coup ; la version
+  d'origin atterrit quand même dans l'historique Git, juste jamais appliquée
+  à la copie de travail).
+- `scripts/sync-db.sh` — commit + push de la DB locale vers `origin/main`, à
+  lancer manuellement de temps en temps pour remonter les données collectées.
+
+Les deux scripts sont à exécuter à la main, comme les autres scripts du
+dossier `scripts/` — aucun timer n'est configuré.
+
 ## Vue d'ensemble du schéma
 
 12 tables + 1 vue, trois familles :
