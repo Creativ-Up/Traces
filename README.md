@@ -25,10 +25,11 @@ Run from the project root:
 ```
 scripts/install.sh     one-time setup (needs connectivity): creates .env from
                         .env.example if missing, initializes the frontend
-                        submodule if empty, installs toolchains/deps, does the
-                        first build (including pre-downloading the speech
-                        model — see below), registers the TRACES LaunchAgent.
-                        Safe to re-run.
+                        submodule if empty, installs Xcode Command Line Tools,
+                        Homebrew, Node.js + yarn, and Rust if any are missing,
+                        does the first build (including pre-downloading the
+                        speech model — see below), registers the TRACES
+                        LaunchAgent. Safe to re-run.
 scripts/build.sh        builds backend + frontend, offline.
 scripts/run.sh          starts the backend, opens Chrome in kiosk mode.
 scripts/update.sh       pulls the latest monorepo commits, syncs the frontend

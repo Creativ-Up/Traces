@@ -24,11 +24,6 @@ if [[ ! -d "$FRONTEND_DIR" ]] || [[ -z "$(ls -A "$FRONTEND_DIR" 2>/dev/null)" ]]
   (cd "$ROOT_DIR" && git submodule update --init frontend)
 fi
 
-if ! command -v yarn >/dev/null 2>&1; then
-  echo "yarn not found; install Node.js + yarn before running this script." >&2
-  exit 1
-fi
-
 # ---- Xcode Command Line Tools -----------------------------------------------
 
 if ! xcode-select -p >/dev/null 2>&1; then
@@ -37,6 +32,38 @@ if ! xcode-select -p >/dev/null 2>&1; then
   echo "Re-run this script after that installation finishes."
   exit 1
 fi
+
+# ---- Homebrew ---------------------------------------------------------------
+
+if ! command -v brew >/dev/null 2>&1; then
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+fi
+
+if ! command -v brew >/dev/null 2>&1; then
+  echo "Installing Homebrew..."
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+fi
+
+command -v brew >/dev/null 2>&1 || { echo "brew still not found on PATH; open a new shell and re-run this script." >&2; exit 1; }
+
+# ---- Node.js + yarn -----------------------------------------------------------
+
+if ! command -v yarn >/dev/null 2>&1; then
+  command -v node >/dev/null 2>&1 || { echo "Installing Node.js..."; brew install node@22; brew link --force node@22; }
+  echo "Enabling yarn via corepack..."
+  corepack enable
+fi
+
+command -v yarn >/dev/null 2>&1 || { echo "yarn still not found on PATH; open a new shell and re-run this script." >&2; exit 1; }
 
 # ---- Rust toolchain --------------------------------------------------------
 
