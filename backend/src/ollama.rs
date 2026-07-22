@@ -2,7 +2,18 @@ use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 const BASE_URL: &str = "http://localhost:11434";
-const MODEL: &str = "gemma4:e4b";
+
+/// Name of the Ollama model to use, e.g. `gemma4:e4b`.
+const SUMMARY_OLLAMA_MODEL_VAR: &str = "SUMMARY_OLLAMA_MODEL";
+
+const DEFAULT_MODEL: &str = "gemma4:e4b";
+
+/// Returns the effective model name: `SUMMARY_OLLAMA_MODEL` if set, else the default —
+/// the safer default for anyone running the binary directly without sourcing
+/// `scripts/.env` first.
+fn model() -> String {
+    std::env::var(SUMMARY_OLLAMA_MODEL_VAR).unwrap_or_else(|_| DEFAULT_MODEL.to_string())
+}
 
 const SYSTEM_PROMPT: &str = "Rôle et contexte :
 Tu es le guide du parcours « TRACES », une exposition sur les souvenirs
@@ -72,7 +83,7 @@ struct ChatMessage {
 
 #[derive(Serialize)]
 struct ChatRequest {
-    model: &'static str,
+    model: String,
     temperature: f32,
     top_p: f32,
     top_k: u32,
@@ -111,7 +122,7 @@ pub async fn generate_summary(lang: &str, artworks: &[VisitedArtwork]) -> Result
     let user_prompt = build_user_prompt(lang, artworks);
 
     let request = ChatRequest {
-        model: MODEL,
+        model: model(),
         temperature: 1.0,
         top_p: 0.95,
         top_k: 64,

@@ -97,6 +97,17 @@ fi
 # if already cached, so safe to re-run.
 (cd "$BACKEND_DIR" && cargo run --release --example fetch_model --offline)
 
+# ---- Ollama model -------------------------------------------------------------
+
+if command -v ollama >/dev/null 2>&1; then
+  if ! ollama list | awk '{print $1}' | grep -qx "$SUMMARY_OLLAMA_MODEL"; then
+    echo "Pulling Ollama model $SUMMARY_OLLAMA_MODEL..."
+    ollama pull "$SUMMARY_OLLAMA_MODEL"
+  fi
+else
+  echo "WARNING: ollama not found on PATH; install it and run 'ollama pull $SUMMARY_OLLAMA_MODEL'." >&2
+fi
+
 # ---- LaunchAgent -------------------------------------------------------------
 
 PLIST_NAME="com.pp1.traces.plist"
