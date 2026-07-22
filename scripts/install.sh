@@ -6,6 +6,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -f "$SCRIPT_DIR/../.env" ]]; then
+  cp "$SCRIPT_DIR/../.env.example" "$SCRIPT_DIR/../.env"
+  echo "Created .env from .env.example — edit it if your layout differs."
+fi
+
 source "$SCRIPT_DIR/common.sh"
 
 if [[ ! -d "$BACKEND_DIR" ]]; then
@@ -13,9 +19,9 @@ if [[ ! -d "$BACKEND_DIR" ]]; then
   exit 1
 fi
 
-if [[ ! -d "$FRONTEND_DIR" ]]; then
-  echo "Frontend project not found: $FRONTEND_DIR" >&2
-  exit 1
+if [[ ! -d "$FRONTEND_DIR" ]] || [[ -z "$(ls -A "$FRONTEND_DIR" 2>/dev/null)" ]]; then
+  echo "Frontend submodule not initialized; running 'git submodule update --init'..."
+  (cd "$ROOT_DIR" && git submodule update --init frontend)
 fi
 
 if ! command -v yarn >/dev/null 2>&1; then
@@ -57,6 +63,12 @@ fi
 (cd "$BACKEND_DIR" && cargo fetch)
 
 "$SCRIPT_DIR/build.sh"
+
+# Downloads the Qwen3-ASR speech model (backend/models/, ~1.8GB) here, while
+# connectivity is available — otherwise it'd download on the first run.sh
+# launch instead, risking a timeout on run.sh's READY_TIMEOUT_SECS. No-op
+# if already cached, so safe to re-run.
+(cd "$BACKEND_DIR" && cargo run --release --example fetch_model --offline)
 
 # ---- LaunchAgent -------------------------------------------------------------
 

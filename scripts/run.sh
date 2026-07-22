@@ -63,5 +63,6 @@ mkdir -p "$CHROME_KIOSK_PROFILE"
   --disable-infobars \
   --noerrdialogs \
   --overscroll-history-navigation=0 \
+  --remote-debugging-port="$CHROME_REMOTE_DEBUGGING_PORT" \
   "$KIOSK_URL" \
   >/dev/null 2>&1 &

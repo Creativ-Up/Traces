@@ -1,7 +1,7 @@
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-ENV_FILE="$SCRIPT_DIR/.env"
-[[ -f "$ENV_FILE" ]] || ENV_FILE="$SCRIPT_DIR/.env.example"
+ENV_FILE="$ROOT_DIR/.env"
+[[ -f "$ENV_FILE" ]] || ENV_FILE="$ROOT_DIR/.env.example"
 set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"

@@ -1,3 +1,8 @@
 logs/*.log
 .DS_Store
-scripts/.env
+.env
+
+# Also covered by backend/.gitignore (nested) — duplicated here as a
+# safety net in case that file is ever removed or edited independently.
+backend/target/
+backend/models/
