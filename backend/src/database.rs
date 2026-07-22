@@ -1,12 +1,16 @@
 use anyhow::{Context, Result};
 use sqlite::{Row, Value};
 
-/// The default database location.
-const DEFAULT_DB_LOCATION: &str = "pp1_collection.db";
+/// Path to the sqlite database file to open, e.g. `../database/pp1_collection.db`.
+const SERVER_DATABASE_PATH_VAR: &str = "SERVER_DATABASE_PATH_VAR";
 
-/// Returns the effective database location.
+const DEFAULT_DB_LOCATION: &str = "../database/pp1_collection.db";
+
+/// Returns the effective database location: `SERVER_DATABASE_PATH_VAR` if set, else the
+/// production database — the safer default for anyone running the binary directly
+/// without sourcing `scripts/.env` first.
 fn db_location() -> String {
-    DEFAULT_DB_LOCATION.to_string()
+    std::env::var(SERVER_DATABASE_PATH_VAR).unwrap_or_else(|_| DEFAULT_DB_LOCATION.to_string())
 }
 
 /// An helper object for database queries.

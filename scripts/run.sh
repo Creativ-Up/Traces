@@ -24,9 +24,11 @@ pkill -f "user-data-dir=$CHROME_KIOSK_PROFILE" 2>/dev/null || true
 [[ -x "$CHROME_BIN" ]] || { echo "$(date) FATAL: Chrome not found: $CHROME_BIN" | tee -a "$SERVER_LOG" >&2; exit 1; }
 [[ -d "$FRONTEND_BUILD_DIR" ]] || { echo "$(date) FATAL: frontend build not found: $FRONTEND_BUILD_DIR" | tee -a "$SERVER_LOG" >&2; exit 1; }
 [[ -d "$ASSETS_DIR" ]] || { echo "$(date) FATAL: assets not found: $ASSETS_DIR" | tee -a "$SERVER_LOG" >&2; exit 1; }
+[[ -f "$DATABASE_PATH" ]] || { echo "$(date) FATAL: database not found: $DATABASE_PATH" | tee -a "$SERVER_LOG" >&2; exit 1; }
 
 export SERVER_FRONTEND_DIR_VAR="$FRONTEND_BUILD_DIR"
 export SERVER_ASSETS_DIR_VAR="$ASSETS_DIR"
+export SERVER_DATABASE_PATH_VAR="$DATABASE_PATH"
 export ROCKET_PROFILE
 export ROCKET_PORT="$SERVER_PORT"
 
@@ -62,4 +64,4 @@ mkdir -p "$CHROME_KIOSK_PROFILE"
   --noerrdialogs \
   --overscroll-history-navigation=0 \
   "$KIOSK_URL" \
-  >> "$LOG_DIR/chrome.log" 2>&1 &
+  >/dev/null 2>&1 &
