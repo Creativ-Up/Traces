@@ -1,0 +1,17 @@
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+ENV_FILE="$SCRIPT_DIR/.env"
+[[ -f "$ENV_FILE" ]] || ENV_FILE="$SCRIPT_DIR/.env.example"
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+BACKEND_DIR="$ROOT_DIR/$BACKEND_DIR_NAME"
+BACKEND_BINARY="$BACKEND_DIR/target/release/pp1-backend-rust"
+FRONTEND_DIR="$ROOT_DIR/$FRONTEND_DIR_NAME"
+FRONTEND_BUILD_DIR="$FRONTEND_DIR/build"
+ASSETS_DIR="$ROOT_DIR/$ASSETS_DIR_NAME"
+LOG_DIR="$ROOT_DIR/$LOG_DIR_NAME"
+
+CHROME_KIOSK_PROFILE="$HOME/Library/Application Support/$CHROME_KIOSK_PROFILE_DIR"
