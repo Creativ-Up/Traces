@@ -8,6 +8,7 @@
 
     <key>ProgramArguments</key>
     <array>
+        <string>/bin/zsh</string>
         <string>__ROOT_DIR__/scripts/run.sh</string>
     </array>
 

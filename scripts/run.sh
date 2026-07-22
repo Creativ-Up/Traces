@@ -66,3 +66,5 @@ mkdir -p "$CHROME_KIOSK_PROFILE"
   --remote-debugging-port="$CHROME_REMOTE_DEBUGGING_PORT" \
   "$KIOSK_URL" \
   >/dev/null 2>&1 &
+
+wait

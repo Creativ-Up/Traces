@@ -41,6 +41,16 @@ scripts/uninstall.sh    unregisters the TRACES LaunchAgent. Removes nothing else
 The kiosk itself runs offline (it's the one providing wifi, not consuming
 it) — only `install.sh` and `update.sh` touch the network.
 
+**Clone the repo outside of `Desktop` (e.g. `~/Traces`), not inside it.**
+macOS's TCC privacy protection on the Desktop folder silently blocks the
+LaunchAgent from opening `run.sh` at login — `launchagent.log` shows
+`/bin/zsh: can't open input file: ...` even though the file is present,
+correctly owned, and executable. There's no user-facing permission prompt
+for this, since it's a background process with no foreground app to
+attribute one to. If TRACES was set up under `Desktop`, move the whole repo
+elsewhere and re-run `install.sh` to re-register the LaunchAgent with the
+new path.
+
 Copy `.env.example` to `.env` (done automatically by `install.sh` if
 missing) and adjust if your layout differs.
 
