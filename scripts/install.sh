@@ -97,6 +97,16 @@ fi
 # if already cached, so safe to re-run.
 (cd "$BACKEND_DIR" && cargo run --release --example fetch_model --offline)
 
+# ---- cliclick ----------------------------------------------------------------
+# Used by run.sh to nudge the OS cursor after launching Chrome, so the
+# `cursor: none` kiosk CSS actually takes effect instead of leaving a stale
+# visible cursor frozen on screen until a visitor touches the input device.
+
+if ! command -v cliclick >/dev/null 2>&1; then
+  echo "Installing cliclick..."
+  brew install cliclick
+fi
+
 # ---- Ollama model -------------------------------------------------------------
 
 if command -v ollama >/dev/null 2>&1; then

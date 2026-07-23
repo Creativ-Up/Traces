@@ -66,5 +66,16 @@ mkdir -p "$CHROME_KIOSK_PROFILE"
   --remote-debugging-port="$CHROME_REMOTE_DEBUGGING_PORT" \
   "$KIOSK_URL" \
   >/dev/null 2>&1 &
+CHROME_PID=$!
 
-wait
+# Nudge the OS cursor once the window is up so the kiosk CSS (cursor: none)
+# actually takes effect, instead of leaving a stale visible cursor on screen
+# until a visitor touches the input device. Move-only (no click) to avoid
+# triggering any on-screen control.
+if command -v cliclick >/dev/null 2>&1; then
+  (sleep 3 && cliclick m:0,0) &
+else
+  echo "$(date) WARNING: cliclick not found, cursor may stay visible until first input" | tee -a "$SERVER_LOG" >&2
+fi
+
+wait "$SERVER_PID" "$CHROME_PID"
