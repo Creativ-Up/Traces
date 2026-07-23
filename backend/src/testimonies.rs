@@ -68,6 +68,10 @@ impl From<RawTestimony> for Testimony {
             Some("en") if content.en.is_empty() => content.en = raw.content.clone(),
             Some("fr") if content.fr.is_empty() => content.fr = raw.content.clone(),
             Some("nl") if content.nl.is_empty() => content.nl = raw.content.clone(),
+            // source_lang unset/unrecognized: no slot to merge the raw text into, so fall
+            // back to it directly rather than losing it if every slot is still empty.
+            _ if content.en.is_empty() && content.fr.is_empty() && content.nl.is_empty() =>
+                content.en = raw.content.clone(),
             _ => {}
         }
         Self {
