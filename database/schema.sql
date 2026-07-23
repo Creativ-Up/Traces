@@ -44,17 +44,9 @@ CREATE TABLE questions (
     content_en  TEXT                               --      utilisées lors des interviews
 );
 
-CREATE TABLE "recorded_testimonies" (
-    id          INTEGER PRIMARY KEY,
-    question_id INTEGER NOT NULL,
-    city        TEXT,
-    source_lang TEXT NOT NULL CHECK (source_lang IN ('fr', 'nl')),
-    content_fr  TEXT NOT NULL,
-    content_nl  TEXT NOT NULL,
-    content_en  TEXT NOT NULL,
-    created_at  TEXT,
-    FOREIGN KEY (question_id) REFERENCES questions(id)
-);
+
+-- (V8) les témoignages enregistrés (interviews) vivent dans `testimonies`
+-- avec visitor_id IS NULL ; la table recorded_testimonies a été supprimée.
 
 CREATE TABLE staff (
     id      INTEGER PRIMARY KEY,
@@ -135,23 +127,10 @@ CREATE TABLE visitors (
 
 CREATE VIEW artwork_published_testimonies AS
 SELECT
-    a.id            AS artwork_id,
-    'recorded'      AS kind,
-    rt.id           AS source_id,     -- id dans recorded_testimonies
-    rt.city         AS city,          -- identification du témoignage : ville…
-    rt.created_at   AS created_at,    -- …et date (anonymisation V3.1)
-    rt.source_lang  AS source_lang,
-    rt.content_fr   AS content_fr,
-    rt.content_nl   AS content_nl,
-    rt.content_en   AS content_en
-FROM recorded_testimonies rt
-JOIN artworks a ON a.question_id = rt.question_id
-UNION ALL
-SELECT
     t.artwork_id    AS artwork_id,
-    'visitor'       AS kind,
-    t.id            AS source_id,     -- id dans testimonies
-    t.city          AS city,          -- ville du site d'installation (renseignée par le backend)
+    CASE WHEN t.visitor_id IS NULL THEN 'recorded' ELSE 'visitor' END AS kind,
+    t.id            AS source_id,
+    t.city          AS city,          -- interviews : ville de collecte ; visiteurs : site d'installation
     t.created_at    AS created_at,
     t.source_lang   AS source_lang,
     t.content_fr    AS content_fr,

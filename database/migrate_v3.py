@@ -24,7 +24,8 @@ DB = sys.argv[1] if len(sys.argv) > 1 else 'pp1_collection.db'
 XLSX = sys.argv[2] if len(sys.argv) > 2 else 'review_translations.xlsx'
 
 
-# Correspondance (fichier_source, question) -> recorded_testimonies.id.
+# Correspondance (fichier_source, question) -> id de l'interview dans `testimonies`
+# (ids historiques préservés lors de la fusion V8 ; interviews = visitor_id IS NULL).
 # Figée car les colonnes speaker/source_file ont été supprimées de la table (V3.1).
 # Stable : l'ordre d'insertion de pp1_to_sqlite.py (= ordre du CSV) produit ces ids.
 RECORDED_IDS = {
@@ -225,11 +226,11 @@ def main():
                             WHERE artwork_id=?''', (fr, nl, en, int(i))).rowcount
     report.append(f'transcriptions (explanation) ré-importées : {n}')
 
-    # 5f. témoignages enregistrés — via RECORDED_IDS (les colonnes speaker et
-    # source_file ont été supprimées de la table ; la feuille garde fichier_source)
-    if not col_exists('recorded_testimonies', 'created_at'):
-        cur.execute('ALTER TABLE recorded_testimonies ADD COLUMN created_at TEXT')
-        report.append('recorded_testimonies.created_at ajoutée')
+    # 5f. témoignages enregistrés (interviews) — via RECORDED_IDS.
+    # V8 : les interviews vivent dans `testimonies` avec visitor_id IS NULL et
+    # leurs ids historiques ; RECORDED_IDS reste donc valable tel quel.
+    # La feuille garde fichier_source (les colonnes speaker/source_file ont été
+    # supprimées de la base en V3.1).
     ws = wb['Témoignages']
     n = miss = 0
     for q, _ville, date, _sl, fr, nl, en, sf in ws.iter_rows(min_row=2, values_only=True):
@@ -239,9 +240,11 @@ def main():
         qid = int(m.group(1)) if m else None
         rid = RECORDED_IDS.get(str(sf).strip(), {}).get(qid)
         created = date.date().isoformat() if hasattr(date, 'date') else (str(date)[:10] if date else None)
-        r = cur.execute('''UPDATE recorded_testimonies
-                           SET content_fr=?, content_nl=?, content_en=?, created_at=?
-                           WHERE id=?''', (fr, nl, en, created, rid))
+        content = {'fr': fr, 'nl': nl, 'en': en}.get(str(_sl or 'fr').strip().lower(), fr)
+        r = cur.execute('''UPDATE testimonies
+                           SET content=?, content_fr=?, content_nl=?, content_en=?, created_at=?
+                           WHERE id=? AND visitor_id IS NULL''',
+                        (content, fr, nl, en, created, rid))
         if rid is not None and r.rowcount == 1:
             n += 1
         else:
@@ -252,7 +255,7 @@ def main():
     # 6a. 5 témoignages retirés du classeur (retrait volontaire confirmé) :
     #     Bernard_Kortrijk_out Q3, Claire_Kortrijk Q7, Godelieve_Kortrijk_out Q2/Q3/Q6
     removed = cur.execute(
-        'DELETE FROM recorded_testimonies WHERE id IN (108, 112, 114, 127, 131)').rowcount
+        'DELETE FROM testimonies WHERE id IN (108, 112, 114, 127, 131) AND visitor_id IS NULL').rowcount
     report.append(f'témoignages retirés (validation musée) : {removed} supprimés')
     # 6b. type d'objet 28 « Printed image » : doublon du type 21 « Print - Image » ;
     #     reclassement de l'œuvre concernée puis suppression de l'entrée dupliquée

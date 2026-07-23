@@ -31,9 +31,11 @@ def main():
     # garde-fou : données runtime rattachées ?
     runtime = cur.execute('''SELECT
         (SELECT COUNT(*) FROM testimonies WHERE artwork_id=:a) +
-        (SELECT COUNT(*) FROM visitor_artwork_views WHERE artwork_id=:a) +
-        (SELECT COUNT(*) FROM recorded_testimonies WHERE artwork_id=:a)''',
+        (SELECT COUNT(*) FROM visitor_artwork_views WHERE artwork_id=:a)''',
         {'a': ARTWORK_ID}).fetchone()[0]
+    if cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='recorded_testimonies'").fetchone()[0]:
+        runtime += cur.execute('SELECT COUNT(*) FROM recorded_testimonies WHERE artwork_id=?',
+                               (ARTWORK_ID,)).fetchone()[0]
     if runtime:
         raise SystemExit(f'⚠ {runtime} enregistrement(s) rattaché(s) à l’œuvre {ARTWORK_ID} — suppression refusée, réattribuer d’abord.')
 
