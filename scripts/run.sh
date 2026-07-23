@@ -71,9 +71,10 @@ CHROME_PID=$!
 # Nudge the OS cursor once the window is up so the kiosk CSS (cursor: none)
 # actually takes effect, instead of leaving a stale visible cursor on screen
 # until a visitor touches the input device. Move-only (no click) to avoid
-# triggering any on-screen control.
+# triggering any on-screen control. 300,300 avoids the top-left corner,
+# where the menu bar can intercept a 0,0 move.
 if command -v cliclick >/dev/null 2>&1; then
-  (sleep 3 && cliclick m:0,0) &
+  (sleep 3 && cliclick m:300,300) &
 else
   echo "$(date) WARNING: cliclick not found, cursor may stay visible until first input" | tee -a "$SERVER_LOG" >&2
 fi
