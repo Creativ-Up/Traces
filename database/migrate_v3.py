@@ -251,6 +251,23 @@ def main():
             miss += 1
     report.append(f'témoignages ré-importés : {n}, sans correspondance exacte : {miss}')
 
+    # 5g. titres des œuvres (feuille « Titres », ajoutée avec les colonnes
+    # title/author de l'Excel musée — V9). Tolérant si la feuille est absente.
+    if 'Titres' in wb.sheetnames:
+        n = miss = 0
+        for i, title, fr, nl, en in wb['Titres'].iter_rows(min_row=2, values_only=True):
+            if i is None:
+                continue
+            r = cur.execute('''UPDATE artworks SET title=?, title_fr=?, title_nl=?, title_en=?
+                               WHERE id=?''', (title, fr, nl, en, int(i)))
+            if r.rowcount == 1:
+                n += 1
+            else:
+                miss += 1
+        report.append(f'titres ré-importés : {n}, ids sans correspondance : {miss}')
+    else:
+        report.append('feuille Titres absente du classeur : titres non ré-importés')
+
     # ── 6. retraits validés par le musée (relecture juillet 2026) ───────
     # 6a. 5 témoignages retirés du classeur (retrait volontaire confirmé) :
     #     Bernard_Kortrijk_out Q3, Claire_Kortrijk Q7, Godelieve_Kortrijk_out Q2/Q3/Q6
