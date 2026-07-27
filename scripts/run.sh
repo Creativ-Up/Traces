@@ -73,8 +73,17 @@ CHROME_PID=$!
 # until a visitor touches the input device. Move-only (no click) to avoid
 # triggering any on-screen control. 300,300 avoids the top-left corner,
 # where the menu bar can intercept a 0,0 move.
-if command -v cliclick >/dev/null 2>&1; then
-  (sleep 3 && cliclick m:300,300) &
+#
+# Resolved explicitly rather than via `command -v`: launchd runs this script
+# with a bare-bones PATH (no /opt/homebrew/bin), so a plain PATH lookup only
+# finds cliclick when run.sh is launched from an interactive shell, not from
+# the LaunchAgent.
+CLICLICK_BIN="$(command -v cliclick 2>/dev/null || true)"
+[[ -z "$CLICLICK_BIN" && -x /opt/homebrew/bin/cliclick ]] && CLICLICK_BIN=/opt/homebrew/bin/cliclick
+[[ -z "$CLICLICK_BIN" && -x /usr/local/bin/cliclick ]] && CLICLICK_BIN=/usr/local/bin/cliclick
+
+if [[ -n "$CLICLICK_BIN" ]]; then
+  (sleep 3 && "$CLICLICK_BIN" m:300,300) &
 else
   echo "$(date) WARNING: cliclick not found, cursor may stay visible until first input" | tee -a "$SERVER_LOG" >&2
 fi
