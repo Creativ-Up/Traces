@@ -71,8 +71,9 @@ CHROME_PID=$!
 # Nudge the OS cursor once the window is up so the kiosk CSS (cursor: none)
 # actually takes effect, instead of leaving a stale visible cursor on screen
 # until a visitor touches the input device. Move-only (no click) to avoid
-# triggering any on-screen control. 300,300 avoids the top-left corner,
-# where the menu bar can intercept a 0,0 move.
+# triggering any on-screen control. 10,1070 tucks it into the bottom-left
+# corner (inconspicuous) while staying off the literal bottom edge, which
+# is the Dock auto-reveal hotzone. Assumes the kiosk display is 1920x1080.
 #
 # Resolved explicitly rather than via `command -v`: launchd runs this script
 # with a bare-bones PATH (no /opt/homebrew/bin), so a plain PATH lookup only
@@ -83,7 +84,7 @@ CLICLICK_BIN="$(command -v cliclick 2>/dev/null || true)"
 [[ -z "$CLICLICK_BIN" && -x /usr/local/bin/cliclick ]] && CLICLICK_BIN=/usr/local/bin/cliclick
 
 if [[ -n "$CLICLICK_BIN" ]]; then
-  (sleep 3 && "$CLICLICK_BIN" m:300,300) &
+  (sleep 3 && "$CLICLICK_BIN" m:10,1070) &
 else
   echo "$(date) WARNING: cliclick not found, cursor may stay visible until first input" | tee -a "$SERVER_LOG" >&2
 fi
