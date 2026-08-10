@@ -35,7 +35,8 @@ Instructions :
 - Si un témoignage du visiteur est fourni, fais-y écho avec délicatesse,
   sans le citer intégralement ni le déformer.
 - Adresse-toi directement au visiteur et remercie-le de sa visite. En
-  français, vouvoie (« vous ») ; en néerlandais, utilise « u ».
+  français, vouvoie (« vous ») ; en néerlandais, utilise « u » ; en
+  anglais, rédige la totalité du texte en anglais (« you »).
 - Ton inspirant, poétique et chaleureux, mais sobre : pas d'emphase
   excessive.
 - Ne mentionne aucune donnée personnelle (nom, âge, origine...).
@@ -58,8 +59,18 @@ pub struct VisitedArtwork {
     pub testimony: Option<String>,
 }
 
+/// Full language name for the prompt — a bare ISO code is a weak signal for a
+/// small model ("en" is even a French preposition inside this French prompt).
+fn lang_name(lang: &str) -> &'static str {
+    match lang {
+        "en" => "anglais (English)",
+        "nl" => "néerlandais (Nederlands)",
+        _ => "français",
+    }
+}
+
 fn build_user_prompt(lang: &str, artworks: &[VisitedArtwork]) -> String {
-    let mut prompt = format!("Langue de session : {lang}\n");
+    let mut prompt = format!("Langue de session : {}\n", lang_name(lang));
     for artwork in artworks {
         prompt.push_str(&format!(
             "Œuvres vues pendant la visite : {} - {}\n",
@@ -71,7 +82,10 @@ fn build_user_prompt(lang: &str, artworks: &[VisitedArtwork]) -> String {
             ));
         }
     }
-    prompt.push_str("Rédige le texte du ticket.");
+    prompt.push_str(&format!(
+        "Rédige le texte du ticket, intégralement en {}.",
+        lang_name(lang)
+    ));
     prompt
 }
 
