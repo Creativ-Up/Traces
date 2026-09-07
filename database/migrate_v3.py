@@ -61,7 +61,10 @@ RECORDED_IDS = {
     'Wim_Kortrijk': {2: 111, 4: 120, 5: 124, 6: 129, 7: 134, 8: 139, 10: 148, 11: 152},
 }
 
-IMG_EXTS = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.tif', '.tiff', '.bmp', '.avif')
+# extensions préservées lors de la normalisation (V10 : les vidéos des
+# nouveaux musées sont des médias comme les autres)
+IMG_EXTS = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.tif', '.tiff', '.bmp', '.avif',
+            '.mp4', '.webm')
 
 
 def normalize_media_name(name: str) -> str:

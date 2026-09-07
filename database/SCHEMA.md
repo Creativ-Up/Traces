@@ -1,10 +1,10 @@
 # PP1 Collection Database — Schéma
 
-Base SQLite générée à partir de `PP1-Collection_Database.xlsx` et des
-témoignages enregistrés traduits FR/NL/EN (fichier de travail
-`transcriptions_clean.csv`, non versionné ici — la table `recorded_testimonies`
-est livrée peuplée), selon le DDL défini dans `schema.sql`. Aligné sur le
-diagramme de classes UML du projet.
+Base SQLite générée à partir de `PP1-Collection_Database.xlsx` (230 œuvres de
+cinq partenaires) et des témoignages enregistrés traduits FR/NL/EN (fichier de
+travail `transcriptions_clean.csv`, non versionné ici — les 150 interviews sont
+livrées peuplées dans `testimonies`), selon le DDL défini dans `schema.sql`.
+Aligné sur le diagramme de classes UML du projet.
 
 **Pipeline de construction** (le visiteur choisit sa langue FR/NL/EN en début
 de session ; tout contenu affiché existe donc en trois versions) :
@@ -18,11 +18,19 @@ de session ; tout contenu affiché existe donc en trois versions) :
                                   # emotions, keywords i18n, thumbnail_url,
                                   # normalisation media_url
 5. python migrate_v4.py <db>      # V4 : artworks.title / title_fr/nl/en
-6. python migrate_v5.py <db>      # V5 : restaure le point d'extension de media_url
-                                  # (écrasé par erreur en V3)
-7. python check_images.py --db <db> --images <dossier>
-                                  # contrôle d'intégrité DB <-> dossier d'images
-                                  # (images renommées : voir le Drive partagé du projet)
+6. python migrate_v5.py <db>      # V5 : point d'extension de media_url
+                                  # (corrigé à la racine dans V3 depuis)
+7. python migrate_v6.py <db>      # V6 : témoignages enregistrés -> une œuvre
+8. python migrate_v7.py <db>      # V7 : retrait de l'œuvre 15 (sans média)
+9. python migrate_v8.py <db>      # V8 : interviews fusionnées dans testimonies
+10. python migrate_v9.py <db> PP1-Collection_Database.xlsx
+                                  # V9 : artworks.author
+11. python migrate_v10.py <db> PP1-Collection_Database.xlsx
+                                  # V10 : collections Huis van Alijn + MUMONS
+12. python prepare_media.py <dossier musée> <sortie>
+                                  # TIF/PNG -> JPG, vidéos MP4 + vignettes
+13. python check_images.py --db <db> --images ../assets
+                                  # contrôle d'intégrité DB <-> assets/
 ```
 
 **Internationalisation** : les colonnes `_fr`/`_nl`/`_en` sont d'abord remplies
@@ -33,10 +41,10 @@ conservées pour la traçabilité.
 ## Vue d'ensemble
 
 ```
-                         ┌────────────────┐     ┌───────────────────────┐
-                         │   questions    │◀────│ recorded_testimonies  │
-                         └────────┬───────┘     │  (FR / NL / EN)       │
-                                  │ question_id └───────────────────────┘
+                         ┌────────────────┐
+                         │   questions    │
+                         └────────┬───────┘
+                                  │ question_id
                                   ▼
    ┌────────────────┐   ┌────────────────────┐   ┌──────────────────┐
    │ types_of_object│──▶│      artworks      │◀──│  transcriptions  │ 
@@ -53,35 +61,35 @@ conservées pour la traçabilité.
 
 ## Tables
 
-### `artworks` — Entité principale (117 lignes)
+### `artworks` — Entité principale (230 lignes)
 
 | Colonne                  | Type    | Notes                                                   |
 |--------------------------|---------|---------------------------------------------------------|
 | `id`                     | INTEGER | PK = Database ID du fichier source                      |
 | `keywords`               | TEXT    | NOT NULL. Excel : « Description, Key words » (mots-clés bruts, usage interne) |
-| `description`            | TEXT    | NOT NULL. Excel : « Explanation » — texte source original (99 FR, 18 EN) |
+| `description`            | TEXT    | NOT NULL. Excel : « Explanation » — texte source original. **La langue varie par ligne** (FR, NL ou EN selon le partenaire et l'œuvre) : utiliser les colonnes i18n pour l'affichage |
 | `description_fr`         | TEXT    | Affichage FR + **base du vecteur** (langue canonique : évite le biais de langue du corpus mixte) |
 | `description_nl`         | TEXT    | Affichage NL                                            |
 | `description_en`         | TEXT    | Affichage EN                                            |
 | `description_vector`     | BLOB    | Embedding sémantique de `description_fr` (via sqlite-vec) — Calculé via `compute_embeddings.py` |
-| `media_url`              | TEXT    | Noms de fichiers image avec extension, séparés par `, `. **Normalisés V3** : minuscules, `[a-z0-9-]` uniquement (`imadeyou-01-053.jpg`). NULL pour l'œuvre 15 (aucune photo). **V5** : le point d'extension, écrasé par erreur en V3 (`imadeyou-01-053-jpg`), a été restauré |
-| `thumbnail_url`          | TEXT    | **V3.** Vignette de l'œuvre = vue principale (nom le plus court de `media_url`). NULL pour l'œuvre 15 |
+| `media_url`              | TEXT    | Noms de fichiers de `assets/`, séparés par `, `. Normalisés : minuscules, `[a-z0-9-]`, extension préservée (`imadeyou-01-053.jpg`). **Le type se déduit de l'extension** : `.jpg` → image, `.mp4` → vidéo (6 œuvres, **V10**) |
+| `thumbnail_url`          | TEXT    | **V3.** Vignette de l'œuvre, toujours une image. Pour les œuvres purement vidéo, vignette `*-thumb.jpg` extraite par `prepare_media.py` (**V10**) |
 | `date_period`            | TEXT    | Forme brute lisible (`"1800-1850"`, `"20th century"`)   |
 | `date_year_min`          | INTEGER | Borne basse calculée pour le matching                   |
 | `date_year_max`          | INTEGER | Borne haute calculée pour le matching                   |
 | `type_of_object_id`      | INTEGER | FK → `types_of_object.id`                               |
 | `emotions`               | TEXT    | Émotions Plutchik concaténées (vue dénormalisée, voir `artwork_emotions` pour les requêtes) |
-| `origin`                 | TEXT    | NOT NULL. Le Fresnoy / Abby / Maison des collections    |
-| `author_name`            | TEXT    | Nom(s) brut(s)                                          |
+| `origin`                 | TEXT    | NOT NULL. Partenaire fournisseur : Maison des collections (Ville de Mons), Abby, Le Fresnoy, **Huis van Alijn**, **MUMONS** (**V10**) |
+| `author_name`            | TEXT    | Excel « Name » — nom(s) brut(s), 99 œuvres              |
+| `author`                 | TEXT    | **V9.** Excel « Author » — auteur de l'œuvre, 14 œuvres. Affichage : `COALESCE(author, author_name)` |
 | `museum_id`              | TEXT    | Excel : « Museum ID ». N° d'inventaire musée (`MSK_0320`, `MOS_5162`, `JL.2022.0.182`…). NULL pour les 4 œuvres Le Fresnoy (IDs 1–4) |
 | `storage_place`          | TEXT    | Lieu de stockage                                        |
 | `popularity`             | INTEGER | NOT NULL, défaut 0. Compteur incrémenté par le backend  |
 | `question_id`            | INTEGER | FK → `questions.id` (peut être NULL : actuellement l'ID 15 ne possède pas de question associée)      |
 | `keywords_fr` `keywords_nl` `keywords_en` | TEXT | **V3.** Mots-clés affichables traduits et relus (feuille « Description - Key words ») |
-| `title` `title_fr` `title_nl` `title_en` | TEXT | **V4.** Titre de l'œuvre, i18n. Nullable : toutes les œuvres n'ont pas de titre (contrairement à `description`) |
-| `title` `title_fr` `title_nl` `title_en` | TEXT | **V4.** Titre de l'œuvre, i18n. Nullable : toutes les œuvres n'ont pas de titre (contrairement à `description`) |
+| `title` `title_fr` `title_nl` `title_en` | TEXT | **V4/V9.** Titre de l'œuvre, i18n. Rempli pour les 230 œuvres depuis la feuille « Titres » du classeur de relecture |
 
-### `artwork_emotions` — Table de jointure (346 lignes)
+### `artwork_emotions` — Table de jointure (595 lignes)
 
 Issue de la roue de Plutchik. Utilisée pour la **similarité Jaccard** sur les émotions.
 
@@ -94,7 +102,7 @@ Issue de la roue de Plutchik. Utilisée pour la **similarité Jaccard** sur les 
 > **V3** : typos corrigées dans les données (`submision` → `submission`,
 > `dissaproval` → `disapproval`).
 
-### `emotions` — Référentiel i18n des émotions (25 lignes) — **V3**
+### `emotions` — Référentiel i18n des émotions (32 lignes) — **V3**
 
 Libellés affichables des émotions Plutchik, dans les trois langues. Jointure :
 `artwork_emotions.emotion = emotions.emotion`.
@@ -122,7 +130,7 @@ feuille (traductions Plutchik standard, **à faire valider**).
 | `translation`        | TEXT    | Traduction moderne du texte de l'objet — source (EN) |
 | `translation_fr/nl/en` | TEXT  | Versions affichées selon la langue de session |
 
-### `types_of_object` (28 lignes) et `questions` (12 lignes)
+### `types_of_object` (27 lignes) et `questions` (12 lignes)
 
 Tables de référence (vocabulaire contrôlé et questions du parcours visiteur).
 Les deux portent des colonnes trilingues pour l'affichage selon la langue de
@@ -135,36 +143,20 @@ colonne source `name`/`content` est conservée). ⚠ Pour `questions`, remplacer
 les traductions machine par les **formulations officielles** FR/NL utilisées
 lors des interviews.
 
-### `recorded_testimonies` — Témoignages enregistrés traduits (155 lignes)
+### `recorded_testimonies` — fusionnée dans `testimonies` (**V8**)
 
-Témoignages recueillis en interview (32 personnes, sites de Lens, Mons et
-Kortrijk), rattachés aux **questions** du parcours (pas aux œuvres) et
-disponibles en trois langues. La langue source est celle de l'enregistrement
-(`fr` ou `nl`) ; les deux autres versions sont des traductions automatiques
-(pipeline faster-whisper + NLLB-200). À ne pas confondre avec `testimonies`
-(témoignages saisis par les visiteurs sur le photomaton, avec modération).
+Les 150 témoignages recueillis en interview (sites de Lens, Mons et Kortrijk)
+vivent désormais dans **`testimonies`**, avec `visitor_id IS NULL` comme
+discriminant, `status='validated'`, `consent_given=1` et leurs **ids
+historiques**. Ils portent un `artwork_id` (**V6** : une œuvre unique parmi
+celles de leur question), `city` et `created_at` (**V3.1** : un témoignage est
+identifié par le couple ville + date, plus aucun prénom nulle part).
 
-| Colonne       | Type    | Notes                                                   |
-|---------------|---------|---------------------------------------------------------|
-| `id`          | INTEGER | PK                                                      |
-| `question_id` | INTEGER | FK → `questions.id`                                     |
-| `city`        | TEXT    | `Lens` / `Mons` / `Kortrijk`                            |
-| `source_lang` | TEXT    | `fr` ou `nl` (CHECK). « Question N » = fr, « Vraag N » = nl |
-| `content_fr`  | TEXT    | NOT NULL                                                |
-| `content_nl`  | TEXT    | NOT NULL                                                |
-| `content_en`  | TEXT    | NOT NULL                                                |
-| `created_at`  | TEXT    | **V3.1.** Date d'enregistrement du témoignage (ISO `YYYY-MM-DD`), issue de la campagne de collecte (oct. 2025 Mons/Lens, fév. 2026 Kortrijk) |
+Le backend les sert donc par sa route `testimonies` sans traitement
+particulier. La correspondance ligne ↔ fichier audio d'origine est conservée
+hors base, dans `migrate_v3.py` (`RECORDED_IDS`), qui reste la clé de ré-import
+des traductions depuis `review_translations.xlsx`.
 
-> **V3.1** : les colonnes `speaker` et `source_file` ont été supprimées, et
-> côté visiteurs `visitors.surname` a également disparu (le visiteur ne donne
-> plus son prénom) ; `testimonies.city` a été ajoutée. Tout témoignage est
-> identifié par le couple **(ville, date)**.
-> (anonymisation). La correspondance ligne ↔ fichier audio d'origine est
-> conservée hors base, dans `migrate_v3.py` (`RECORDED_IDS`), qui sert de clé
-> de ré-import des traductions depuis `review_translations.xlsx`.
-
-**Cardinalités** : 0..N témoignages par question (de 12 à 15 selon la question) ;
-une personne peut témoigner sur plusieurs questions.
 
 ### `visitors` — Sessions visiteurs éphémères
 
@@ -238,7 +230,7 @@ WHERE artwork_id = ?;
 
 Un témoignage enregistré apparaît pour **chacune des œuvres** de sa question
 (la vue matérialise la relation question → œuvres à la lecture, sans dupliquer
-le stockage) : ~1 480 lignes virtuelles pour 155 + N témoignages stockés.
+le stockage) : 150 + N lignes, chaque témoignage enregistré étant rattaché à une seule œuvre depuis la **V6**.
 
 ### `summaries` — Résumés générés par LLM (relation 1:1 avec visitors)
 
