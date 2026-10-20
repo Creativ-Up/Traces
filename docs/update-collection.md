@@ -22,8 +22,9 @@ reaches the kiosk. `scripts/apply-remote-db.sh` merges the two: it takes
 the reference data from the repo and carries over the visitors' data from
 the kiosk.
 
-> **Never run `scripts/sync-db.sh` while the repo is public.** It pushes the
-> kiosk's database — visitors' testimonies included — to GitHub.
+> **Never push the kiosk's database to GitHub.** The repo is public and the
+> kiosk's database contains visitors' testimonies. Backups stay local
+> (Desktop, USB key).
 
 ## You'll need
 
@@ -216,7 +217,7 @@ Then restart the Mac mini.
 
 ## Don't
 
-- **Don't run `sync-db.sh`** (see above).
+- **Don't push the kiosk's database to GitHub** (see above).
 - Don't type `git` commands yourself (`pull`, `reset`, `checkout`,
   `stash`): the two scripts handle Git without touching visitors' data.
 - Don't restart the Mac mini during `update.sh`, or before answering the
