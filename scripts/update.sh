@@ -12,19 +12,20 @@
 # script just syncs the checkout to whatever that pin currently says.
 #
 # The db (database/pp1_collection.db) is tracked in git but also written
-# live by the kiosk (visitors, testimonies, summaries — see sync-db.sh for
-# how that gets pushed back). A plain `git pull` would clobber those local
+# live by the kiosk (visitors, testimonies, summaries). A plain
+# `git pull` would clobber those local
 # writes with whatever's in origin, or fail outright if they conflict. So
 # the kiosk's local db always wins here: stash it, pull everything else,
 # restore it. Origin's version of the db still lands in .git history — it's
 # just never applied to the working copy — so a human can `git stash list`
-# / diff it in later if a manual merge is ever needed.
+# / diff it in later if a manual merge is ever needed. To actually bring a
+# new reference collection to the kiosk, run apply-remote-db.sh right after
+# this script (see docs/update-collection.md).
 #
 # The dirty-check compares against HEAD (not a plain worktree `git diff`)
-# because sync-db.sh stages the db (`git add`) before committing — a plain
-# `git diff` is blind to staged-but-uncommitted changes (e.g. left behind by
-# a sync-db.sh run that got interrupted before its commit), which used to
-# let update.sh skip the stash and then fail on `git pull` with "local
+# because a plain `git diff` is blind to staged-but-uncommitted db changes
+# (e.g. a db left `git add`-ed by an interrupted manual commit), which used
+# to let update.sh skip the stash and then fail on `git pull` with "local
 # changes... would be overwritten by merge".
 #
 # frontend/public/config.json (and config.dev.json) are similarly editable

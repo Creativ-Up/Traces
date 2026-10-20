@@ -75,11 +75,17 @@ ou entrerait en conflit avec ces écritures locales. Utiliser à la place :
   kiosque (elle est mise de côté puis restaurée après coup ; la version
   d'origin atterrit quand même dans l'historique Git, juste jamais appliquée
   à la copie de travail).
-- `scripts/sync-db.sh` — commit + push de la DB locale vers `origin/main`, à
-  lancer manuellement de temps en temps pour remonter les données collectées.
+- `scripts/apply-remote-db.sh` — à lancer juste après `update.sh` quand la
+  collection a changé : sauvegarde la DB du kiosque, puis fusionne ses données
+  visiteurs dans la nouvelle base de référence (`merge_kiosk_data.py`). Procédure
+  complète : `docs/update-collection.md`.
 
 Les deux scripts sont à exécuter à la main, comme les autres scripts du
 dossier `scripts/` — aucun timer n'est configuré.
+
+> **La base d'un kiosque ne doit jamais être poussée sur GitHub** : le repo est
+> public et elle contient les témoignages des visiteurs. Les sauvegardes se font
+> en local (Bureau, clé USB), via `apply-remote-db.sh`.
 
 ## Vue d'ensemble du schéma
 

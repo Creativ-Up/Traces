@@ -19,8 +19,8 @@
 #      summaries) into the reference db taken from HEAD
 #   4. swaps it in, after printing the report for a human to read
 #
-# It deliberately does NOT call sync-db.sh: the repo is public, and the live
-# db contains visitors' testimonies. They must not be pushed to GitHub.
+# It never pushes anything: the repo is public, and the live db contains
+# visitors' testimonies. They must never be pushed to GitHub.
 #
 # The backend is NOT restarted: reboot the Mac mini once done.
 # Offline-safe: needs no connectivity (update.sh already fetched everything).
