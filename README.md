@@ -151,6 +151,8 @@ Here are the components used for the prototype:
   - **Microphone**: LOGITECH Yeti Orb
   - **2 Power Strips**
 
+For the control part, we used a basic joystick/button arcade controler for 1 player
+
 The final prototype is plugged into a blue industrial (CEE) socket and is securised by a circuit breaker.
 
 ---
