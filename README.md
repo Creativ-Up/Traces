@@ -121,6 +121,42 @@ config files, sometimes without even that — check the specific file):
 
 ---
 
+## For makers
+
+All parts of the booth are available in the folder 'models'.
+
+### Structure
+
+The 'Structure' folder contains all the .step parts of the structure.
+We used pine battens, which can be replaced for more robustness.
+All the panels are made of 18 mm fire-rated Valchromat to meet the regulations for public venues.
+
+### 3D printing parts 
+
+The '3D Stuff' folder contains the 3D printing parts that help and organize the booth.
+  - For the squares, an infill of 50% minimum is required
+  - For the other parts, use the default parameters
+  - When printing the magnetic key, pause the print before the last layers to insert the magnets
+  - The ticket guide may needs some adjustments to be fully usable
+
+Everything was printed in PLA for our prototype, but more robust materials can be used
+
+### Components
+
+Here are the components used for the prototype:
+  - **Computer**: MacMini M4 24 GB 512 GB
+  - **Screen**: Samsung OLED 44”
+  - **Speaker**: SONOS Ray
+  - **Printer**: EPSON TM-T20III
+  - **Microphone**: LOGITECH Yeti Orb
+  - **2 Power Strips**
+
+For the control part, we used a basic joystick/button arcade controler for 1 player
+
+The final prototype is plugged into a blue industrial (CEE) socket and is securised by a circuit breaker.
+
+---
+
 ## For developers
 
 ### Repository structure
