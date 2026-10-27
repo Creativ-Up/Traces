@@ -1,22 +1,25 @@
 """
 compute_embeddings.py
 
-Calcule les embeddings sémantiques de la colonne `description` (Excel "Explanation")
-et les stocke dans `artworks.description_vector` au format compatible sqlite-vec.
+Computes the semantic embeddings of the artwork descriptions (description_fr,
+or the original description when there is no French version yet) and stores
+them in `artworks.description_vector`, in the sqlite-vec format.
+The kiosk uses them to pick related artworks. REQUIRED after adding artworks:
+the kiosk server does not start if an artwork has no vector.
 
-Modèle : paraphrase-multilingual-mpnet-base-v2 (768 dimensions, FR/EN/+50 langues)
-Format : BLOB float32 sérialisé via sqlite_vec.serialize_float32
-Distance recommandée pour le matching : cosinus (vec_distance_cosine)
+Model: paraphrase-multilingual-mpnet-base-v2 (768 dimensions, FR/EN/NL and 50+ languages)
+Format: float32 BLOB serialised with sqlite_vec.serialize_float32
+Recommended distance for matching: cosine (vec_distance_cosine)
 
-Prérequis :
+Requirements:
     pip install sentence-transformers sqlite-vec numpy
 
-Usage :
-    python compute_embeddings.py [chemin_db]
-    Défaut : pp1_collection.db
+Usage:
+    python compute_embeddings.py [db_path]
+    Default: pp1_collection.db
 
-Le premier lancement télécharge le modèle (~1 GB) depuis HuggingFace.
-Les lancements suivants utilisent le cache local (~/.cache/huggingface/).
+The first run downloads the model (~1 GB) from Hugging Face; later runs use
+the local cache (~/.cache/huggingface/).
 """
 
 import sqlite3
@@ -32,17 +35,17 @@ MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 
 
 def main(db_path: Path) -> None:
-    print(f"[1/5] Chargement du modèle : {MODEL_NAME}")
-    print("      (téléchargement ~1 GB au premier lancement, puis cache local)")
+    print(f"[1/5] Loading the model: {MODEL_NAME}")
+    print("      (~1 GB download on the first run, then local cache)")
     model = SentenceTransformer(MODEL_NAME)
-    embed_dim = model.get_sentence_embedding_dimension()
-    print(f"      Dimension des vecteurs : {embed_dim}")
+    embed_dim = (getattr(model, 'get_embedding_dimension', None) or model.get_sentence_embedding_dimension)()
+    print(f"      Vector size: {embed_dim}")
 
-    print(f"\n[2/5] Connexion à la base et chargement de sqlite-vec : {db_path}")
+    print(f"\n[2/5] Opening the database and loading sqlite-vec: {db_path}")
     conn = sqlite3.connect(db_path)
-    # L'extension ne sert qu'à la vérification finale : certains Python (macOS
-    # notamment) ne savent pas charger d'extension SQLite ; les vecteurs sont
-    # écrits quand même (serialize_float32 n'en a pas besoin).
+    # The extension is only needed for the final check: some Python builds
+    # (macOS in particular) cannot load SQLite extensions; vectors are written
+    # anyway (serialize_float32 does not need it).
     vec_loaded = False
     try:
         conn.enable_load_extension(True)
@@ -50,19 +53,19 @@ def main(db_path: Path) -> None:
         conn.enable_load_extension(False)
         vec_loaded = True
     except (AttributeError, sqlite3.OperationalError) as exc:
-        print(f"      sqlite-vec non chargé ({exc}) : vérification finale ignorée")
+        print(f"      sqlite-vec not loaded ({exc}): final check skipped")
     cur = conn.cursor()
 
-    print(f"\n[3/5] Récupération des descriptions à encoder")
+    print(f"\n[3/5] Reading the descriptions to encode")
     rows = cur.execute(
         "SELECT id, COALESCE(description_fr, description) FROM artworks "
         "WHERE description IS NOT NULL ORDER BY id"
     ).fetchall()
     ids = [r[0] for r in rows]
     descriptions = [r[1] for r in rows]
-    print(f"      {len(ids)} descriptions trouvées")
+    print(f"      {len(ids)} descriptions found")
 
-    print(f"\n[4/5] Encodage en batch")
+    print(f"\n[4/5] Encoding")
     embeddings = model.encode(
         descriptions,
         batch_size=32,
@@ -71,10 +74,10 @@ def main(db_path: Path) -> None:
         normalize_embeddings=True,
     )
     print(
-        f"      Embeddings produits : shape={embeddings.shape}, dtype={embeddings.dtype}"
+        f"      Embeddings: shape={embeddings.shape}, dtype={embeddings.dtype}"
     )
 
-    print(f"\n[5/5] Écriture des vecteurs dans artworks.description_vector")
+    print(f"\n[5/5] Writing the vectors into artworks.description_vector")
     updates = [
         (sqlite_vec.serialize_float32(vec.tolist()), artwork_id)
         for artwork_id, vec in zip(ids, embeddings)
@@ -86,22 +89,23 @@ def main(db_path: Path) -> None:
         "SELECT COUNT(*) FROM artworks WHERE description_vector IS NOT NULL"
     ).fetchone()[0]
     n_total = cur.execute("SELECT COUNT(*) FROM artworks").fetchone()[0]
-    print(f"      {n_filled} / {n_total} items avec un vecteur")
+    print(f"      {n_filled} / {n_total} artworks with a vector")
 
     if not vec_loaded:
         conn.close()
-        print(f"\n✓ Embeddings calculés et stockés dans {db_path.resolve()}")
+        print(f"\n✓ Embeddings computed and stored in {db_path.resolve()}")
+        print(f"  → next step: python check_collection.py --db {db_path} --images ../assets")
         return
 
-    # --- Vérification qualitative : top 5 plus proches d'une œuvre choisie ---
+    # --- Sanity check: the 5 closest artworks to a sample artwork ---
     sample_id = ids[0]
     print(
-        f"\n=== Vérification : top 5 plus proches sémantiquement de l'œuvre #{sample_id} ==="
+        f"\n=== Check: the 5 artworks closest in meaning to artwork #{sample_id} ==="
     )
     sample_desc = cur.execute(
         "SELECT description FROM artworks WHERE id = ?", (sample_id,)
     ).fetchone()[0]
-    print(f"Description de référence : {sample_desc[:200]}...\n")
+    print(f"Reference description: {sample_desc[:200]}...\n")
 
     results = cur.execute(
         """
@@ -123,11 +127,12 @@ def main(db_path: Path) -> None:
         print(f"  #{artwork_id:<3}  dist={dist:.4f}  {preview!r}")
 
     conn.close()
-    print(f"\n✓ Embeddings calculés et stockés dans {db_path.resolve()}")
+    print(f"\n✓ Embeddings computed and stored in {db_path.resolve()}")
+    print(f"  → next step: python check_collection.py --db {db_path} --images ../assets")
 
 
 if __name__ == "__main__":
     db_path = Path(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DB)
     if not db_path.exists():
-        sys.exit(f"Base introuvable : {db_path.resolve()}")
+        sys.exit(f"database not found: {db_path.resolve()}")
     main(db_path)

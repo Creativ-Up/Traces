@@ -7,6 +7,10 @@ collected on site (testimonies, visits, receipts).
 
 For a code-only update, [update.md](update.md) is enough.
 
+Throughout this page, "a developer" means the person who maintains your copy
+of TRACES (for a museum, the technical person who imported the collection:
+see [`database/README.md`](../database/README.md)).
+
 ## Why a separate procedure?
 
 The kiosk's database (`database/pp1_collection.db`) holds two kinds of data:
@@ -89,13 +93,13 @@ Nothing is replaced until you answer `y` at the end.
    ```
 3. [ ] It prints the merge report, for example:
    ```
-     • visiteurs repris : …
-     • consultations reprises : …
-     • témoignages visiteurs repris : 42 (ids réattribués à partir de 156)
-     • résumés repris : …
-     • résultat : 230 œuvres, 150 interviews, 42 témoignages visiteurs
-     • références d’œuvres cassées : 0
-     • vecteurs d’embedding : 230/230
+     • visitors kept: …
+     • artwork views kept: …
+     • visitor testimonies kept: 42 (new ids from 156)
+     • visit summaries kept: …
+     • result: 230 artworks, 150 interviews, 42 visitor testimonies
+     • broken artwork references: 0
+     • embedding vectors: 230/230
    ```
 4. [ ] It stops on `Apply this database to the kiosk? [y/N]`. **Don't
    answer yet.**
@@ -104,10 +108,11 @@ Nothing is replaced until you answer `y` at the end.
    finish, eject the key.
 6. [ ] **Check the report**:
    - the artwork count matches the repo (`Reference db` line);
-   - `témoignages visiteurs repris` equals the number on the
+   - `visitor testimonies kept` equals the number on the
      `Live db (kiosk)` line;
-   - `références d’œuvres cassées : 0`;
-   - `vecteurs d’embedding` shows every artwork (e.g. `230/230`).
+   - `broken artwork references: 0`;
+   - `embedding vectors` shows every artwork (e.g. `230/230`). If it does
+     not, the script stops on its own before this question.
 7. [ ] All good: type `y`, Enter. The script ends with
    `Done: … artworks, … visitor testimonies kept.`
 8. [ ] Anything off: type `N`, Enter. Nothing is changed. Take a photo of
@@ -115,8 +120,8 @@ Nothing is replaced until you answer `y` at the end.
 
 Two messages that are acceptable:
 
-- *consultations ignorées*: visits to an artwork that was removed from the
-  collection. Expected.
+- *view of artwork … (not in the new database): ignored*: visits to an
+  artwork that was removed from the collection. Expected.
 - *N testimony(ies) set aside*: testimonies about a removed artwork. They
   are not lost: the script saved them to
   `~/Desktop/temoignages_orphelins_….csv`. Copy that file to the USB key
@@ -167,7 +172,7 @@ else.
 | `ABORTED: the backend is still running on port 8000` | Run `lsof -ti tcp:8000 \| xargs kill`, then `./scripts/apply-remote-db.sh` again |
 | `WARNING: the reference db has no more artworks than the kiosk` | Answer `N`: `update.sh` did not complete. Run it again, then `apply-remote-db.sh` |
 | `ABORTED: merged db has … visitor testimonies` | Nothing was changed. Keep the backup, ask a developer |
-| `vecteurs d’embedding` lower than the artwork count | Answer `N`, ask a developer |
+| `ABORTED: … artwork(s) without a vector` | Nothing was changed; restart the Mac mini to bring the kiosk back. On the work computer, run `compute_embeddings.py` and push; then `update.sh` and `apply-remote-db.sh` again |
 | Kiosk doesn't come back, or shows a blank page | Wait 2 minutes, restart once; otherwise ask a developer |
 | `Cannot print receipt` at the end of a visit | The backend can't find the printer: see below |
 

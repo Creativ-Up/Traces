@@ -5,8 +5,8 @@ versionnée dans ce dossier et lue par le serveur du kiosque. Elle réunit 230
 œuvres de cinq partenaires et les 150 interviews recueillies à Mons, Lens et
 Courtrai, selon le DDL de `schema.sql`.
 
-Pour ajouter une collection, voir le [README](README.md) (guide destiné aux
-musées, et commandes pour l'équipe technique).
+Pour ajouter une collection, voir le [README](README.md) (guide en anglais, destiné
+aux musées qui intègrent eux-mêmes leur collection).
 
 **Chaîne d'intégration d'une collection** (tout contenu affiché existe en
 trois versions, FR / NL / EN, selon la langue choisie par le visiteur) :

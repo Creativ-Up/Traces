@@ -54,27 +54,27 @@ def main(kiosk_path, new_path, out_path):
     for t in ('visitors', 'visitor_artwork_views', 'summaries'):
         n = cur.execute(f'SELECT COUNT(*) FROM main.{t}').fetchone()[0]
         if n:
-            raise SystemExit(f'⚠ la base cible contient déjà {n} ligne(s) dans {t} — '
-                             'fusion interrompue (risque de doublons).')
+            raise SystemExit(f'ABORTED: the reference database already has {n} row(s) in {t} '
+                             '(risk of duplicates).')
 
     # ── 1. visiteurs ──
     kiosk_cols = [r[1] for r in cur.execute('PRAGMA kiosk.table_info(visitors)')]
     cols = [c for c in columns(cur, 'visitors') if c in kiosk_cols]
     cur.execute(f"INSERT INTO main.visitors ({','.join(cols)}) SELECT {','.join(cols)} FROM kiosk.visitors")
-    report.append(f'visiteurs repris : {cur.rowcount}')
+    report.append(f'visitors kept: {cur.rowcount}')
 
     # ── 2. consultations ──
     rows = cur.execute('SELECT visitor_id, artwork_id, viewed_at FROM kiosk.visitor_artwork_views').fetchall()
     kept = dropped = 0
     for vid, aid, seen in rows:
         if aid not in valid_artworks:
-            warn.append(f'consultation sur l’œuvre {aid} (absente de la nouvelle base) : ignorée')
+            warn.append(f'view of artwork {aid} (not in the new database): ignored')
             dropped += 1
             continue
         cur.execute('INSERT INTO main.visitor_artwork_views (visitor_id, artwork_id, viewed_at) VALUES (?,?,?)',
                     (vid, aid, seen))
         kept += 1
-    report.append(f'consultations reprises : {kept}' + (f', ignorées : {dropped}' if dropped else ''))
+    report.append(f'artwork views kept: {kept}' + (f', ignored: {dropped}' if dropped else ''))
 
     # ── 3. témoignages visiteurs (nouveaux ids) ──
     k_cols = columns(cur, 'testimonies')            # colonnes de la base cible
@@ -108,24 +108,23 @@ def main(kiosk_path, new_path, out_path):
             w = csv.DictWriter(fh, fieldnames=shared)
             w.writeheader()
             w.writerows(orphans)
-        warn.append(f'{len(orphans)} témoignage(s) visent une œuvre absente de la nouvelle base : '
-                    f'NON importés (artwork_id est NOT NULL), exportés dans {csv_path.name} '
-                    'pour rattachement manuel à une autre œuvre')
-    report.append(f'témoignages visiteurs repris : {moved} (ids réattribués à partir de '
-                  f'{next_id - moved})' + (f' — {orphan} mis de côté (voir CSV)' if orphan else ''))
+        warn.append(f'{len(orphans)} testimony(ies) about an artwork missing from the new database: '
+                    f'NOT imported, saved to {csv_path.name} to be attached to another artwork by hand')
+    report.append(f'visitor testimonies kept: {moved} (new ids from {next_id - moved})'
+                  + (f', {orphan} set aside (see the CSV)' if orphan else ''))
 
     # ── 4. résumés ──
     if table_exists(cur, 'summaries'):
         cur.execute('INSERT INTO main.summaries (visitor_id, content, created_at) '
                     'SELECT visitor_id, content, created_at FROM kiosk.summaries')
-        report.append(f'résumés repris : {cur.rowcount}')
+        report.append(f'visit summaries kept: {cur.rowcount}')
 
     # ── 5. modérateurs éventuels ──
     if table_exists(cur, 'staff'):
         n = cur.execute('SELECT COUNT(*) FROM kiosk.staff').fetchone()[0]
         if n:
             cur.execute('INSERT OR IGNORE INTO main.staff SELECT * FROM kiosk.staff')
-            report.append(f'comptes staff repris : {n}')
+            report.append(f'staff accounts kept: {n}')
 
     out.commit()
 
@@ -133,26 +132,26 @@ def main(kiosk_path, new_path, out_path):
     interviews = cur.execute('SELECT COUNT(*) FROM main.testimonies WHERE visitor_id IS NULL').fetchone()[0]
     visiteurs = cur.execute('SELECT COUNT(*) FROM main.testimonies WHERE visitor_id IS NOT NULL').fetchone()[0]
     artworks = cur.execute('SELECT COUNT(*) FROM main.artworks').fetchone()[0]
-    report.append(f'résultat : {artworks} œuvres, {interviews} interviews, {visiteurs} témoignages visiteurs')
+    report.append(f'result: {artworks} artworks, {interviews} interviews, {visiteurs} visitor testimonies')
     broken = cur.execute('''SELECT COUNT(*) FROM main.testimonies t
                             LEFT JOIN main.artworks a ON a.id = t.artwork_id
                             WHERE t.artwork_id IS NOT NULL AND a.id IS NULL''').fetchone()[0]
-    report.append(f'références d’œuvres cassées : {broken}')
+    report.append(f'broken artwork references: {broken}')
 
-    # vecteurs : ils viennent de la base de référence (artworks n'est jamais
-    # modifiée ici). Contrôle explicite — sans eux, l'algorithme de matching
-    # d'Emmanuel ne peut pas fonctionner.
+    # vectors come from the reference database (artworks is never changed
+    # here). Without them the kiosk server does not start: blocking.
     vec = cur.execute('SELECT COUNT(description_vector) FROM main.artworks').fetchone()[0]
-    report.append(f'vecteurs d’embedding : {vec}/{artworks}')
-    if vec < artworks:
-        warn.append(f'{artworks - vec} œuvre(s) sans vecteur : lancer '
-                    'compute_embeddings.py sur la base fusionnée avant de la déployer')
+    report.append(f'embedding vectors: {vec}/{artworks}')
 
     cur.execute('DETACH DATABASE kiosk')
     out.close()
     print('\n'.join('  • ' + r for r in report))
     for w in dict.fromkeys(warn):
         print('  ⚠ ' + w)
+    if vec < artworks:
+        raise SystemExit(f'ABORTED: {artworks - vec} artwork(s) without a vector in the repository database: '
+                         'the kiosk server would not start. Nothing was changed. Run compute_embeddings.py '
+                         'on the work computer, push, then run update.sh and this script again.')
 
 
 if __name__ == '__main__':

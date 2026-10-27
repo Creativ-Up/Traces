@@ -1,272 +1,448 @@
-# Verser les collections de votre musée dans TRACES
+# Adding your museum's collection to TRACES
 
-TRACES présente aux visiteurs des objets de musée liés à l'enfance, leur pose
-une question sur leurs propres souvenirs et enregistre leur témoignage. Les
-souvenirs s'accumulent ainsi autour de chaque objet.
+TRACES shows visitors museum objects related to childhood, asks them a
+question about their own memories and records their testimony. Memories
+build up around each object over time.
 
-L'installation réunit aujourd'hui **230 œuvres de cinq institutions** : la
-Maison des collections de la Ville de Mons, Abby, Le Fresnoy, le Huis van
-Alijn et le MUMONS. Tous les textes existent en **français, néerlandais et
-anglais**.
+The database already holds **230 artworks from five institutions** (Maison
+des collections of the City of Mons, Abby, Le Fresnoy, Huis van Alijn and
+MUMONS) and 150 recorded interviews. Every text exists in **French, Dutch and
+English**.
 
-Ce guide explique comment votre musée peut y ajouter ses propres œuvres. Il
-s'adresse d'abord aux équipes des musées ; la dernière partie décrit les
-commandes à lancer par l'équipe technique.
+This guide explains how your museum can add its own artworks to that
+collection and show them on its own TRACES kiosk. You do everything
+yourselves, with the scripts in this folder: there is no central team to
+send your data to.
 
-## En bref
+## Overview
 
-| Étape | Qui | Quoi |
+Two people in your museum are involved: someone from the **collections**
+team, who knows the objects, and a **technical** person comfortable with a
+terminal, Git and Python.
+
+| Step | Who | What |
 | --- | --- | --- |
-| 1 | Le musée | Choisit ses œuvres et remplit le modèle de tableur `template_collection.xlsx` |
-| 2 | Le musée | Rassemble les images et vidéos, et les envoie avec le tableur |
-| 3 | L'équipe technique | Intègre les œuvres et prépare les traductions dans les deux autres langues |
-| 4 | Le musée | Relit les traductions dans un classeur Excel |
-| 5 | L'équipe technique | Intègre les corrections et met le kiosque à jour |
+| [1](#1-before-you-start) | Technical | Get your own copy of TRACES and install the tools |
+| [2](#2-choose-the-artworks) | Collections | Choose the artworks and the question each one is linked to |
+| [3](#3-fill-in-the-spreadsheet) | Collections | Fill in a copy of the spreadsheet template |
+| [4](#4-prepare-the-media) | Both | Gather the images and videos, then convert them |
+| [5](#5-import-the-artworks) | Technical | Import the artworks into the database |
+| [6](#6-translate-with-deepl) | Technical | Translate the texts into the other two languages with DeepL |
+| [7](#7-review-the-translations) | Collections | Review the translations in an Excel workbook |
+| [8](#8-load-compute-check) | Technical | Load the reviewed texts, compute the vectors, run the final check |
+| [9](#9-publish-and-deploy) | Technical | Commit, push and update the kiosk |
 
-Le musée n'a rien à installer : tout se fait dans Excel.
+## 1. Before you start
 
-## 1. Choisir les œuvres
+### Your own copy of TRACES
 
-Les partenaires actuels ont fourni entre 4 et 99 œuvres chacun. Quelques
-repères :
+1. **Fork** [Creativ-Up/Traces](https://github.com/Creativ-Up/Traces) on
+   GitHub. Your fork is where you commit your artworks, and where your kiosk
+   downloads its updates from.
+2. **Clone your fork onto your work computer** (Windows, macOS or Linux):
+   ```bash
+   git clone https://github.com/<your-account>/Traces.git
+   ```
+3. **Install your kiosk (a Mac mini) from your fork**, outside the Desktop
+   folder, then follow "For kiosk administrators" in the root
+   [README](../README.md):
+   ```bash
+   git clone --recurse-submodules https://github.com/<your-account>/Traces.git ~/Traces
+   cd ~/Traces && ./scripts/install.sh
+   ```
+   A kiosk installed from the original repository would never receive your
+   artworks.
 
-- **Un lien avec l'enfance** : jouets, école, photographies de famille,
-  vêtements, archives (actes, lettres), fêtes, objets du quotidien…
-- **Des images de bonne qualité** : les œuvres sont affichées en grand, sur un
-  écran de 44 pouces.
-- **Des droits d'utilisation** : les images et les textes sont affichés dans
-  l'installation **et publiés dans ce dépôt GitHub, qui est public**. Le
-  musée doit pouvoir autoriser ces deux usages.
-- **Des personnes reconnaissables** : pour une photographie de personnes
-  vivantes identifiables, assurez-vous que leur accord le permet.
+A fork of a public repository is public: everything you commit (artworks,
+images, texts) can be seen by anyone.
 
-Chaque œuvre est associée à **une des 12 questions** posées au visiteur juste
-après l'avoir découverte. Choisissez pour chaque œuvre la question qui lui
-correspond le mieux :
+### Rights
 
-| N° | Question posée au visiteur |
+- **Your artworks**: you must be allowed to show the images and texts in the
+  installation **and** to publish them in a public GitHub repository. For
+  photographs of identifiable living people, check that their consent covers
+  this use.
+- **The 230 existing artworks and the 150 interviews** belong to the partner
+  institutions and to the people interviewed; they are not covered by the code
+  licence. Ask the TRACES project partners before showing them in your own
+  installation. The scripts cannot hide or remove them.
+
+### Tools on the work computer
+
+- [Git](https://git-scm.com) and Python 3.9 or newer. On macOS the commands
+  are `python3` and `python3 -m pip`; a
+  [virtual environment](https://docs.python.org/3/library/venv.html) avoids
+  conflicts with the system Python.
+- The Python packages (`sentence-transformers` also installs PyTorch, a
+  download of a few GB):
+  ```bash
+  pip install openpyxl pillow deepl sentence-transformers sqlite-vec numpy
+  ```
+- [ffmpeg](https://ffmpeg.org), only if you have videos (it creates their
+  thumbnails).
+- A **DeepL API key**: create an account on
+  [deepl.com/pro-api](https://www.deepl.com/pro-api). New accounts get the
+  free "Developer" plan, a **one-time credit of 1,000,000 characters that
+  never renews**; older accounts may still have the former "API Free" plan
+  (500,000 characters per month). A collection of 100 artworks needs between
+  50,000 and 200,000 characters, depending on the length of the texts. The
+  translation script shows the credit DeepL reports for your key.
+
+Give the key to the scripts through an environment variable, in the terminal
+where you run them (it is lost when you close the terminal):
+
+```bash
+export DEEPL_AUTH_KEY="your-key"        # macOS / Linux
+$env:DEEPL_AUTH_KEY = "your-key"        # Windows PowerShell
+```
+
+Never write the key in any file in the repository.
+
+### Good habits
+
+- Run the scripts **from the `database/` folder** of your clone.
+- **Close the Excel workbooks** before running a script that reads or writes
+  them.
+- `import_collection.py` and `translate_collection.py` have a `--dry-run`
+  option: it checks everything and writes nothing. Use it first.
+- The database and the review workbook are tracked by Git. Until you have
+  committed, this command, run from the **root** of the repository, undoes
+  all your changes to them (media files copied into `assets/` must be deleted
+  by hand):
+  ```bash
+  git restore --source=HEAD --staged --worktree database/pp1_collection.db database/review_translations.xlsx
+  ```
+
+## 2. Choose the artworks
+
+Existing partners contributed between 4 and 99 artworks each. Look for:
+
+- **a link with childhood**: toys, school, family photographs, clothing,
+  archives (certificates, letters), celebrations, everyday objects…
+- **good images**: artworks are shown large, on a 44-inch screen.
+
+Each artwork is linked to **one of 12 questions**. During a visit, the kiosk
+asks a question and shows a few artworks linked to it; the visitor chooses
+one, explores it and the testimonies already left about it, then records
+their own answer. Pick the question that fits each artwork best:
+
+| No. | Question (English version, as shown on the kiosk) |
 | --- | --- |
-| 1 | Et vous ? Comment était votre enfance ? Était-elle heureuse, triste, ennuyeuse ? Quel est le premier souvenir qui vous vient à l'esprit quand vous pensez à votre enfance ? |
-| 2 | Si vous aviez un espace très limité pour conserver des souvenirs, quels sont les 3 souvenirs que vous garderiez ? |
-| 3 | Et vous ? Conservez-vous un objet spécial ou symbolique de votre enfance, hérité de vos parents ? Pouvez-vous nous raconter son histoire ? |
-| 4 | Enfant, vous souvenez-vous de vous être réveillé la nuit à cause d'un cauchemar ? Ou au contraire, y a-t-il un rêve agréable et marquant dont vous vous souvenez encore ? |
-| 5 | Aviez-vous des animaux de compagnie quand vous étiez enfant ? Quel est votre meilleur souvenir d'enfance avec un animal ? |
-| 6 | Quel était votre jeu préféré quand vous étiez enfant ? |
-| 7 | Avez-vous un souvenir d'enfance lié à une lettre — écrite, envoyée ou reçue — qui vous a marqué ? Pouvez-vous nous raconter votre histoire ? |
-| 8 | Savez-vous pourquoi vos parents ont choisi votre prénom ? Quelle est l'histoire derrière ce choix ? |
-| 9 | Avez-vous un souvenir d'enfance lié à un vêtement particulier ou à un uniforme que vous portiez quand vous étiez petit ? |
-| 10 | Quel est votre meilleur souvenir d'enfance lié à une fête comme la Saint-Nicolas ou Noël ? |
-| 11 | Quel est le premier souvenir d'enfance marquant, lié à des retrouvailles avec des êtres chers, qui vous vient à l'esprit ? |
-| 12 | Et vous, quand vous étiez enfant et que vous aviez besoin d'être réconforté ou protégé, vos parents ou grands-parents invoquaient-ils un saint, un proche ou un personnage particulier, réel ou imaginaire ? Aviez-vous une figure protectrice ? Qui était-ce ? |
+| 1 | What about you? What was your childhood like? Was it happy, sad, boring? What is the first memory that comes to mind when you think about your childhood? |
+| 2 | If you had a very limited space to store memories, what are 3 memories you would keep? |
+| 3 | And you? Do you keep a special or symbolic object from your childhood inherited by your parents? Can you share it's story? |
+| 4 | Do you have childhood memories of waking up at night because of a nightmare? Or what was a memorable pleasant dream you remember still? |
+| 5 | Did you have pets when you were a kid? What's your best childhood memory with a pet? |
+| 6 | What was your favorite game when you were a child? |
+| 7 | Do you have a childhood memory related to a letter, written, sent or received, that made an impression on you? Can you share your story? |
+| 8 | Do you know why your parents choose your name? What's the story behind? |
+| 9 | Do you have a childhood memory linked to a special piece of clothes of yours or a uniform you were wearing when you were little? |
+| 10 | What's your best childhood memory linked with a celebration like Saint-Nicolas's day or christmas? |
+| 11 | What is the first memorable childhood memory related to reuniting with loved ones that comes to mind? |
+| 12 | And you, when you were a child and in need of being conforted or protected, did your parents or grandparents invoked a specific saint, relative or character, real or imaginary? Did you have a protective figure? Who was it? |
 
-## 2. Remplir le tableur
+The French and Dutch versions are in the "Questions" sheet of the template.
 
-Ouvrez `template_collection.xlsx` et remplissez la feuille **« Œuvres »**,
-une ligne par œuvre à partir de la ligne 3. La ligne 1 rappelle le contenu de
-chaque colonne et la ligne 2 contient les en-têtes : ne les modifiez pas. La
-feuille « Exemple » montre une ligne remplie.
+## 3. Fill in the spreadsheet
 
-| Colonne | Obligatoire | Contenu | Exemple |
+**Make a copy** of `template_collection.xlsx`, for example
+`database/collections/<your-museum>.xlsx`, and fill in its **"Artworks"**
+sheet, one row per artwork, starting at row 3. Keep this file: you need it
+again to correct or add artworks, and you commit it at step 9. Row 1 explains
+each column and row 2 holds the headers: do not change them. The "Example"
+sheet shows a filled-in row.
+
+| Column | Required | Content | Example |
 | --- | --- | --- | --- |
-| Database ID | non | **À laisser vide** : TRACES attribue les identifiants | |
-| Museum ID | oui | Numéro d'inventaire de l'objet chez vous | `INV.1987.042` |
-| Origin | oui | Nom de votre institution, identique sur toutes les lignes | `Musée de l'Exemple` |
-| Language | oui | Langue des textes de la ligne : `fr`, `nl` ou `en` | `fr` |
-| Type of object | oui | Une catégorie de la feuille « Types » (liste déroulante) | `Toy or game` |
-| Date /period | oui | Date ou période, sous une forme lisible | `1935`, `1870-1880`, `19e siècle` |
-| Title | oui | Titre affiché au visiteur | `Ours en peluche` |
-| Author | non | Auteur, artiste ou fabricant | |
-| Name | non | Personnes liées à l'objet (modèle, destinataire…) | |
-| Storage place | non | Ville ou lieu de conservation | `Mons` |
-| Keywords | oui | Mots-clés sur la forme **et** le contenu, séparés par des virgules | `ours, peluche, jouet, tissu usé` |
-| Emotions | oui | 2 à 4 émotions de la feuille « Émotions », séparées par des virgules | `Joie, Confiance` |
-| Explanation | oui | Texte de présentation lu par le visiteur | 3 à 8 phrases |
-| Question | oui | Numéro de la question associée (1 à 12, voir plus haut) | `3` |
-| Media | oui | Noms des fichiers images ou vidéos, séparés par des virgules | `INV_1987_042_face.jpg` |
+| Database ID | no | **Leave empty**: TRACES assigns the IDs | |
+| Museum ID | yes | Inventory number of the object in your museum | `INV.1987.042` |
+| Origin | yes | Name of your institution, spelled the same on every row and in every later spreadsheet | `Museum of Example` |
+| Language | yes | Language of the texts of the row: `fr`, `nl` or `en` | `en` |
+| Type of object | yes | A category from the "Types" sheet (drop-down list) | `Toy or game` |
+| Date /period | yes | Date or period, in a readable form | `1935`, `1870-1880`, `19th century` |
+| Title | yes | Title shown to visitors | `Teddy bear` |
+| Author | no | Author, artist or maker | |
+| Name | no | People related to the object (sitter, recipient…) | |
+| Storage place | no | City or place where the object is kept | `Mons` |
+| Keywords | yes | Keywords about the shape **and** the content, comma-separated | `teddy bear, plush, toy, worn fabric` |
+| Emotions | yes | 2 to 4 emotions from the "Emotions" sheet, comma-separated | `Joy, Trust` |
+| Explanation | yes | Text read by visitors | 3 to 8 sentences |
+| Question | yes | Question number (1 to 12, see step 2) | `3` |
+| Media | yes | Names of the image or video files, comma-separated | `INV_1987_042_front.jpg` |
 
-Quelques conseils :
+Tips:
 
-- **Une seule langue par ligne.** Écrivez chaque œuvre dans la langue où vous
-  êtes le plus à l'aise ; les lignes peuvent être dans des langues
-  différentes. Les deux autres langues sont préparées pour vous (étape 3).
-- **Le texte « Explanation »** est lu à l'écran, debout, par un public
-  familial : phrases courtes, pas de jargon. Décrivez concrètement ce que
-  montre l'objet et son histoire. Ce texte sert aussi à rapprocher les œuvres
-  qui se ressemblent.
-- **Les émotions** viennent de la roue des émotions de Plutchik : joie,
-  confiance, tristesse, sérénité… (« nostalgie », par exemple, n'en fait pas
-  partie). Les libellés français, néerlandais ou anglais de la feuille
-  « Émotions » sont tous acceptés. Elles servent à proposer au visiteur des
-  œuvres qui se répondent.
-- **Un type d'objet absent de la liste** est accepté, mais il sera créé et
-  traduit à part : préférez une catégorie existante quand c'est possible.
+- **One language per row.** Write the texts for each artwork in the language
+  you are most comfortable with; rows can use different languages. The other
+  two languages are prepared at step 6.
+- **The Explanation** is read on screen, standing up, by visitors of all
+  ages: short sentences, no jargon. Describe concretely what the object shows
+  and its story. This text is also used to find artworks that resemble each
+  other.
+- **Emotions** come from Plutchik's wheel of emotions: joy, trust, sadness,
+  serenity… ("nostalgia", for instance, is not one of them). French, Dutch and
+  English labels from the "Emotions" sheet are all accepted. Emotions are
+  used to suggest related artworks to the visitor.
+- **An object type missing from the list** is accepted and created, but it
+  then has to be translated like the other texts: use an existing category
+  when you can.
 
-**Objets portant un texte** (lettre, acte, inscription, étiquette) : utilisez
-aussi la feuille facultative **« Transcriptions »**. Recopiez le texte tel
-qu'il est écrit sur l'objet (orthographe d'origine), avec une courte
-explication pour le visiteur, et reprenez le même Museum ID que dans
-« Œuvres ».
+**Objects that carry a text** (letter, certificate, inscription, label): also
+fill in the optional **"Transcriptions"** sheet. Copy the text as it is
+written on the object (original spelling), add a short explanation for
+visitors, and use the same Museum ID as in "Artworks".
 
-## 3. Préparer les médias
+## 4. Prepare the media
 
-| Média | Format attendu | Remarques |
+| Media | Expected format | Notes |
 | --- | --- | --- |
-| Images | JPG ou TIF, au moins 1 500 px sur le grand côté | Converties et réduites à 2 000 px par nos soins. Une image par vue ; la **première** de la colonne Media sert de vignette |
-| Vidéos | MP4 (codec H.264), **moins de 100 Mo** par fichier | Un extrait de 30 secondes à 3 minutes suffit. Une vignette est extraite automatiquement |
+| Images | JPG, PNG or TIF, at least 1,500 px on the long side | Converted to JPG, at most 2,000 px on the long side. One image per view; the **first image** in the Media column is the thumbnail |
+| Videos | MP4 (H.264 codec), **under 100 MB** per file | An excerpt of 30 seconds to 3 minutes is enough. A thumbnail is created automatically |
 
-Deux points importants pour les vidéos :
+- **Videos play without sound** and with no playback controls. If speech
+  matters, provide a subtitled version (subtitles burnt into the image).
+- MOV files and camera RAW files (NEF, CR2…) are not supported: export them to
+  MP4 or JPG first.
+- You do not need to rename your files: give their exact names in the Media
+  column, and the script and the import apply the same naming rule. **But
+  avoid names already used in `assets/`** by another museum (simple numbers
+  such as `1972-158.jpg` already exist): adding your museum's name to your
+  file names is the safest choice.
 
-- **Elles sont jouées sans le son**, en boucle et sans boutons de lecture.
-  Si la parole compte, fournissez une version sous-titrée (sous-titres
-  incrustés dans l'image).
-- Les formats MOV et les fichiers bruts d'appareil photo (NEF, CR2…) ne sont
-  pas pris en charge : exportez-les en MP4 ou en JPG.
-
-Inutile de renommer vos fichiers : indiquez simplement leur nom exact dans la
-colonne Media. Envoyez le tableur et un dossier contenant tous les médias
-(par WeTransfer, SharePoint ou une clé USB).
-
-## 4. Relire les traductions
-
-Nous traduisons vos textes dans les deux autres langues avec
-[DeepL](https://www.deepl.com), puis nous vous envoyons le classeur de
-relecture `review_translations.xlsx`. Une traduction automatique ne suffit
-pas pour un texte affiché au public : **votre relecture est indispensable**.
-
-Dans le classeur :
-
-- chaque feuille correspond à un type de texte (Titres, Descriptions, mots-clés,
-  Transcriptions…) ; la colonne `id` est l'identifiant TRACES de chaque œuvre.
-  Le classeur contient les textes de tous les partenaires : **nous vous
-  indiquons les identifiants de vos œuvres**, ne relisez que ces lignes ;
-- **corrigez uniquement les cellules jaunes**. Celles qui portent le
-  commentaire « Traduction automatique (DeepL) — à relire » n'ont encore été
-  relues par personne ;
-- les cellules grises (identifiant, texte d'origine) ne doivent pas être
-  modifiées, et les lignes ne doivent être ni ajoutées, ni supprimées, ni
-  déplacées.
-
-Ce qu'il faut vérifier : le sens, le vocabulaire propre à votre domaine, les
-noms propres, les titres (faut-il les traduire ou les garder tels quels ?) et
-le registre : vouvoiement ou tutoiement, cohérent avec le reste de vos
-textes.
-
-Selon le calendrier, les traductions automatiques peuvent être mises en
-service en attendant votre relecture ; vos corrections les remplacent alors à
-la mise à jour suivante.
-
-## 5. Mise en service
-
-L'équipe technique intègre vos corrections, vérifie la base, puis met à jour
-le kiosque sans perdre les témoignages déjà recueillis
-(procédure : [`docs/update-collection.md`](../docs/update-collection.md)).
-
-Vos œuvres apparaissent alors dans le parcours. Les témoignages que les
-visiteurs laissent à leur sujet sont relus par l'équipe du lieu d'exposition
-avant d'être montrés aux visiteurs suivants. **Les témoignages des visiteurs
-restent sur l'ordinateur de l'installation** : ils ne sont jamais publiés
-dans ce dépôt.
-
-### Ce que deviennent vos données
-
-Les images, vidéos et textes de vos œuvres sont publiés dans ce dépôt GitHub
-public. Ils ne sont pas couverts par la licence du code : **ils restent votre
-propriété** et ne peuvent pas être réutilisés sans votre accord.
-
----
-
-## Pour l'équipe technique
-
-### Prérequis
-
-- Python 3.9 ou plus récent, puis :
-  `pip install openpyxl pillow deepl sentence-transformers sqlite-vec numpy`
-- [ffmpeg](https://ffmpeg.org) pour les vignettes des vidéos
-- Une clé d'API DeepL. Le plan gratuit (« Developer ») offre un **crédit
-  unique de 1 000 000 de caractères, qui ne se renouvelle pas** ; au-delà, il
-  faut passer à un plan payant. Une collection de 100 œuvres demande entre
-  50 000 et 200 000 caractères selon la longueur des notices : le crédit
-  gratuit couvre donc plusieurs collections. `--dry-run` donne le chiffre
-  exact sans rien consommer, et le script affiche le crédit restant à chaque
-  passage. La clé se passe par la variable d'environnement `DEEPL_AUTH_KEY`
-  (sous Windows PowerShell : `$env:DEEPL_AUTH_KEY = "votre-clé"`).
-
-Les textes envoyés à DeepL sont les notices publiques des œuvres, jamais les
-témoignages.
-
-### Intégrer une nouvelle collection
-
-Depuis le dossier `database/` :
+Put all the media files in one folder, then convert them into a **working
+folder outside the repository**:
 
 ```bash
-# 1. médias : conversion et noms normalisés, dans un dossier de travail HORS du dépôt
-python prepare_media.py "<dossier livré par le musée>" "<dossier de travail>"
-#    puis copier les images et vidéos (pas le CSV) dans ../assets/
+python prepare_media.py "<folder with your media>" "<working folder>" --assets ../assets
+```
 
-# 2. œuvres : vérifier d'abord (--dry-run n'écrit rien), puis importer
-python import_collection.py pp1_collection.db "<tableur du musée>.xlsx" --assets ../assets --dry-run
-python import_collection.py pp1_collection.db "<tableur du musée>.xlsx" --assets ../assets
+The script prints the number of files prepared, the files skipped and any
+warning: missing ffmpeg, video codec other than H.264, file over 100 MB, or a
+file name that **already exists in `assets/`**. In that last case, do not
+copy: rename your file, update the Media column and prepare it again.
 
-# 3. traductions : estimer le volume, puis traduire vers le classeur de relecture
-python translate_collection.py pp1_collection.db review_translations.xlsx --dry-run
-python translate_collection.py pp1_collection.db review_translations.xlsx
+Then **copy the images and videos (not the `_media_mapping.csv` file) into
+the `assets/` folder** at the root of the repository.
 
-# 4. charger les traductions en base
+## 5. Import the artworks
+
+Check first:
+
+```bash
+python import_collection.py pp1_collection.db "collections/<your-museum>.xlsx" --assets ../assets --dry-run
+```
+
+**Fix every line starting with ⚠ during the dry run** (see
+[Troubleshooting](#troubleshooting)), then import:
+
+```bash
+python import_collection.py pp1_collection.db "collections/<your-museum>.xlsx" --assets ../assets
+```
+
+Expected output (example with two artworks):
+
+```
+  • artworks created: 2, updated: 0, already in the database and left unchanged: 0
+  • new TRACES ids: 235-236 (give them to your reviewers; use --ids 235-236 with translate_collection.py)
+  • transcriptions imported: 1
+  • collection: 232 artworks
+  • artworks to translate: 2
+  • artworks without a vector: 2 (compute_embeddings.py, REQUIRED before deploying: ...)
+    Museum ID → TRACES id
+    INV.1987.042 → 235
+    INV.1987.043 → 236
+  → next step: python translate_collection.py pp1_collection.db review_translations.xlsx --ids 235-236 --dry-run
+```
+
+**Keep the list of TRACES IDs**: your reviewers need it at step 7, and you
+need the range at step 6. If new object types were created, the report also
+gives their IDs.
+
+Running the import again never creates duplicates, but **it leaves imported
+artworks unchanged**. To apply a fix to an artwork already imported (or a
+Transcriptions row added afterwards), run the same command with `--update`.
+
+## 6. Translate with DeepL
+
+```bash
+python translate_collection.py pp1_collection.db review_translations.xlsx --ids 235-236 --dry-run
+python translate_collection.py pp1_collection.db review_translations.xlsx --ids 235-236
+```
+
+Replace `235-236` with your own range. The dry run lists the texts to
+translate and the number of characters, without calling DeepL. The real run
+shows your remaining DeepL credit, then:
+
+```
+  • workbook updated: rows added 8, rows updated 0, cells translated 16
+```
+
+The translations are written into `review_translations.xlsx`, **not into the
+database**. To show them on the kiosk before the review, run steps 8 and 9
+now, then again after the review.
+
+Option: `--keep-titles` copies titles unchanged into the three languages
+(film titles, proper names) instead of translating them.
+
+## 7. Review the translations
+
+This step is for the collections team. Machine translation is not good enough
+on its own for texts shown to the public: **the review is essential**. A real
+example: DeepL translated the Dutch title "Kinderen spelen school" (children
+pretending to be at school) as "Children playing at school".
+
+Send `database/review_translations.xlsx` to your reviewers. While they work on
+it, do not run `translate_collection.py`. When they send it back, put it in
+`database/` under the same name. The workbook's "Lisez-moi" sheet sums up the
+rules, in French and then in English.
+
+In the workbook:
+
+- each sheet holds one kind of text: `Titres` (titles), `Descriptions`,
+  `Description - Key words` (keywords), `Transcriptions` and
+  `Transcriptions Explications` (explanations of the transcriptions),
+  `Types d'objets` (object types);
+- the workbook holds the texts of every partner: **only review the rows whose
+  `id` is one of your TRACES IDs** (at the bottom of each sheet). In
+  `Types d'objets`, the `id` is the ID of the object type, given by the import
+  report;
+- **correct only the yellow cells**. Those with the comment "Machine
+  translation (DeepL), to review" have not been reviewed by anyone yet; you
+  can delete the comment once a cell is reviewed;
+- grey cells (ID, original text) must not be changed, and rows must not be
+  added, deleted or moved.
+
+What to check: the meaning, the vocabulary of your field, proper names,
+titles (should they be translated or kept as they are?), and the register
+(formal or informal address), consistent with the rest of your texts.
+
+## 8. Load, compute, check
+
+```bash
 python import_translations.py pp1_collection.db review_translations.xlsx
-
-# 5. vecteurs sémantiques (obligatoire : sans vecteur, le serveur du kiosque ne démarre pas)
 python compute_embeddings.py pp1_collection.db
-
-# 6. contrôle final : doit afficher « BASE PRÊTE À DÉPLOYER »
 python check_collection.py --db pp1_collection.db --images ../assets
 ```
 
-Puis committer `database/pp1_collection.db`, `database/review_translations.xlsx`
-et les nouveaux fichiers de `assets/`, et déployer sur le kiosque avec
-[`docs/update-collection.md`](../docs/update-collection.md).
+- `import_translations.py` loads the workbook into the database. A line
+  "1 id(s) not in the database" for descriptions and keywords is normal: it
+  refers to an artwork that was removed from the collection.
+- `compute_embeddings.py` computes the vectors used to suggest related
+  artworks. **It is required**: without them the kiosk server does not
+  start. The first run downloads a model of about 1 GB.
+- `check_collection.py` is the final check. It must end with:
+  ```
+  DATABASE READY TO DEPLOY
+  ```
+  It also lists "files in assets/ that no artwork uses". Most come from the
+  existing collection; if one of your files is listed, check its Media cell.
 
-Le rapport de `import_collection.py` signale chaque problème du tableur
-(type ou émotion inconnus, média introuvable, colonne obligatoire vide…) et
-liste les identifiants attribués, à communiquer au musée pour la relecture.
-Faites corriger le tableur et relancez : l'import ne crée jamais de doublon.
-Pour modifier des œuvres déjà intégrées, ajoutez `--update`, toujours avec le
-tableur du musée concerné (jamais `PP1-Collection_Database.xlsx`, refusé) ;
-une valeur non reconnue n'écrase jamais la valeur existante.
-`--origin "<nom du musée>"` limite l'import à un musée.
+## 9. Publish and deploy
 
-`translate_collection.py --ids 235-260` limite la traduction à certaines
-œuvres ; `--keep-titles` recopie les titres sans les traduire (titres de
-films, noms propres).
-
-### Au retour de la relecture
+From the root of your clone:
 
 ```bash
-python import_translations.py pp1_collection.db review_translations_corrige.xlsx
-python compute_embeddings.py pp1_collection.db        # si des descriptions françaises ont changé
-python check_collection.py --db pp1_collection.db --images ../assets
+git add database/pp1_collection.db database/review_translations.xlsx database/collections/ assets/
+git commit -m "Add the collection of <your museum>"
+git push
 ```
 
-Remplacer ensuite `review_translations.xlsx` par le classeur corrigé avant de
-committer. Le classeur étant unique, ne l'envoyer qu'à un musée à la fois. Une ligne dont le texte d'origine a changé depuis la traduction
-est laissée de côté (avec un avertissement) : relancer alors
-`translate_collection.py`.
+Then update your kiosk with [`docs/update-collection.md`](../docs/update-collection.md).
+That page was written for the pilot kiosk: replace `~/Desktop/Traces` with
+the folder of your kiosk's clone (for example `~/Traces`). The procedure
+keeps the testimonies already left by visitors, and stops without changing
+anything if testimonies would be lost or if an artwork has no vector.
 
-### Contenu du dossier
+> **Never push a kiosk's database to GitHub**: it contains the visitors'
+> testimonies, and the repository is public.
 
-| Fichier | Rôle |
+## Adapting the kiosk to your venue
+
+A few settings depend on where the kiosk stands. They belong to the frontend
+(the `frontend/` folder), a separate repository included as a Git submodule:
+you cannot push changes to it, so you make them **on the kiosk**, in
+`~/Traces/frontend/public/`, then run `./scripts/build.sh` and restart.
+
+- `config.json`, key `SESSION.city`: a short lowercase ID for your location
+  (for example `ghent`), stored with each visitor testimony and used by the
+  moderation tool. `update.sh` keeps this change.
+- `languages/fr.json`, `nl.json` and `en.json`, in `translations`: add a key
+  `"city.<your-id>"` with the name of your city (without it, no location is
+  shown next to the testimonies), and adapt `"credits"`.
+- `images/partners.png` (credits screen) and `receipt-partners.svg` (printed
+  ticket): the partner logos.
+
+**`update.sh` does not keep the changes to the language files and images**,
+and they can make it stop (`would be overwritten`). Before each update, keep
+a copy of the files you changed and undo them with
+`git -C frontend checkout -- public/languages public/images public/receipt-partners.svg`;
+after the update, copy your versions back and run `./scripts/build.sh`.
+
+## Later changes
+
+- **Correct a translation**: correct it in `review_translations.xlsx`, then
+  repeat steps 8 and 9.
+- **Correct an original text** (title, explanation, keywords…): correct your
+  spreadsheet, run the import with `--update`, translate again (step 6: only
+  the changed texts are translated), review, then steps 8 and 9. `--update`
+  only accepts your own spreadsheet, never `PP1-Collection_Database.xlsx`. A
+  value it does not recognise (question, type, emotion, missing media file)
+  never replaces the current one.
+- **Add more artworks**: add rows to your spreadsheet and follow steps 4 to 9
+  again. Artworks already imported are left unchanged.
+- **Remove an artwork**: not handled by the scripts.
+- **Syncing your fork with the original repository**: Git cannot merge two
+  versions of the database or of the review workbook. Keep your own versions
+  (`git checkout --ours database/pp1_collection.db database/review_translations.xlsx`);
+  they already contain the original collection.
+
+## Troubleshooting
+
+| Message | What to do |
 | --- | --- |
-| `pp1_collection.db` | La base SQLite de référence, lue par le serveur du kiosque |
-| `template_collection.xlsx` | Le modèle de tableur à envoyer aux musées |
-| `PP1-Collection_Database.xlsx` | Le tableur source des 230 œuvres actuelles (même format) |
-| `review_translations.xlsx` | Le classeur de relecture : source de vérité de tous les textes FR / NL / EN |
-| `prepare_media.py` | Conversion et renommage des médias livrés par un musée |
-| `import_collection.py` | Import des œuvres d'un tableur dans la base |
-| `translate_collection.py` | Traductions DeepL vers le classeur de relecture |
-| `import_translations.py` | Import du classeur de relecture dans la base |
-| `compute_embeddings.py` | Vecteurs sémantiques des descriptions (choix des œuvres proposées) |
-| `check_collection.py` | Contrôle avant déploiement : médias, vecteurs, traductions |
-| `schema.sql`, `SCHEMA.md` | Le schéma de la base et sa documentation technique |
+| `ModuleNotFoundError` | Install the Python packages (step 1) |
+| `database not found` / `workbook not found` | Run the command from the `database/` folder and check the file name |
+| `media "…" not found in assets/` | Copy the prepared media into `assets/` (step 4) and check the name in the Media column |
+| `thumbnail "…-thumb.jpg" not found in assets/` | Video without a thumbnail: install ffmpeg and run `prepare_media.py` again |
+| `… already exists in ../assets` (prepare_media) | Rename your file, update the Media column, prepare it again |
+| `produced by several files` (prepare_media) | Two of your files get the same name: rename one |
+| `emotion "…" is not in the reference list, ignored` | Use a label from the "Emotions" sheet of the template |
+| `no recognised emotion` | Fill in "Emotions" with labels from the "Emotions" sheet |
+| `question not recognised` | Use a question number from 1 to 12 |
+| `unknown language` | Use `fr`, `nl` or `en` in the Language column |
+| `unreadable date` | Write the date as a year, a range (`1870-1880`) or a century |
+| `object type missing, row skipped` | Fill in "Type of object" |
+| `"Database ID" or "Museum ID" is required` | Fill in "Museum ID" |
+| `id … already belongs to "…"` | Leave "Database ID" empty |
+| `artwork listed twice in the spreadsheet` | Two rows share the same Museum ID |
+| `column "…" empty for N artwork(s)` | Fill in that column for the artworks listed |
+| `already in the database and left unchanged` after a fix | Run the import again with `--update` |
+| `missing DeepL key` | Set `DEEPL_AUTH_KEY` in the same terminal (step 1) |
+| `DeepL refused the key` | The key is wrong: copy it again from your DeepL account |
+| `cannot reach DeepL` | Check the internet connection |
+| `not enough DeepL credit` / `DeepL credit used up` | Switch to a paid DeepL plan, or translate fewer artworks at a time with `--ids` |
+| `cannot write …: close it in Excel` | Close the workbook in Excel and run the command again |
+| `row(s) skipped because the source text changed after translation` | Run `translate_collection.py` before `import_translations.py` |
+| `still missing a title or description` / `object types without a translation` | Run `translate_collection.py`, review, then `import_translations.py` |
+| `sqlite-vec not loaded … final check skipped` | Harmless: the vectors are written anyway |
+| `missing media files: N` / `artworks without a vector` / `BLOCKING ERROR(S)` | Copy the missing media, or run `compute_embeddings.py`, then the check again |
+| `PP1-Collection_Database.xlsx must not be used to update existing artworks` | Use `--update` with your own spreadsheet only |
 
-Les anciens scripts de migration (V3 à V11) ont été appliqués à la base puis
-retirés du dépôt ; ils restent consultables dans l'historique Git. Leur
-historique est résumé dans [`SCHEMA.md`](SCHEMA.md).
+## Contents of this folder
+
+| File | Role |
+| --- | --- |
+| `pp1_collection.db` | The SQLite database read by the kiosk server |
+| `template_collection.xlsx` | The spreadsheet template for a new collection (copy it, do not fill it in directly) |
+| `PP1-Collection_Database.xlsx` | The source spreadsheet of the 230 current artworks (same format, read-only) |
+| `review_translations.xlsx` | The review workbook: the source of every FR / NL / EN text |
+| `prepare_media.py` | Converts and renames the media files of a collection |
+| `import_collection.py` | Imports the artworks of a spreadsheet into the database |
+| `translate_collection.py` | Translates the missing texts with DeepL, into the review workbook |
+| `import_translations.py` | Loads the review workbook into the database |
+| `compute_embeddings.py` | Computes the vectors used to suggest related artworks |
+| `check_collection.py` | Final check before deploying: media, vectors, translations |
+| `schema.sql`, `SCHEMA.md` | The database schema and its technical documentation (in French) |
+
+The database history (migrations V3 to V11, and the scripts removed in
+October 2026) is summarised in [`SCHEMA.md`](SCHEMA.md).

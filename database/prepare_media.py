@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
 """
-Prépare les médias livrés par un musée pour le kiosque TRACES.
+Prepares the media files delivered by a museum for the TRACES kiosk.
 
-Ce que fait le script :
-  - TIF / PNG  -> JPG qualité 88, redimensionné à 2000 px max sur le grand côté
-  - JPG / JPEG -> recopiés en .jpg (ré-encodés seulement si > 2000 px)
-  - MP4        -> recopiés tels quels, + vignette « <nom>-thumb.jpg » extraite à
-                  1 seconde (ffmpeg) et contrôle du codec H.264 (ffprobe)
-  - MOV / RAW (NEF, CR2…) / documents -> ignorés : demander au musée des MP4
-    (H.264) et des JPG/TIF, ou les convertir avant
-  - renommage à la convention TRACES : minuscules, séparateurs -> '-',
-    extension préservée (IMadeYou_01_053.JPG -> imadeyou-01-053.jpg).
-    import_collection.py applique la même règle aux noms cités dans le tableur.
-  - écrit _media_mapping.csv dans le dossier de sortie : nom d'origine -> nom final
+What the script does:
+  - TIF / PNG  -> JPG, quality 88, resized to 2000 px max on the long side
+  - JPG / JPEG -> copied as .jpg (re-encoded only if larger than 2000 px)
+  - MP4        -> copied as is, plus a thumbnail "<name>-thumb.jpg" taken at
+                  1 second (ffmpeg) and a check of the H.264 codec (ffprobe)
+  - MOV / RAW (NEF, CR2…) / documents -> skipped: export them to MP4 (H.264)
+    or JPG/TIF first
+  - renames files to the TRACES convention: lower case, separators -> '-',
+    extension kept (IMadeYou_01_053.JPG -> imadeyou-01-053.jpg).
+    import_collection.py applies the same rule to the names in the spreadsheet.
+  - writes _media_mapping.csv in the output folder: original name -> final name
 
-Le dossier de sortie est un dossier de travail : copier ensuite les médias
-(pas le CSV) dans assets/ à la racine du repo. Les vidéos doivent peser moins
-de 100 Mo (limite de GitHub) : ré-encoder les plus lourdes.
+The output folder is a working folder: then copy the media files (not the CSV)
+into assets/ at the root of the repository. Videos must be smaller than 100 MB
+(GitHub limit): re-encode larger ones.
 
-Prérequis :  pip install pillow  (+ ffmpeg pour les vignettes des vidéos)
-Usage :
-    python prepare_media.py <dossier livré par le musée> <dossier de sortie>
+Requirements:  pip install pillow  (+ ffmpeg for video thumbnails)
+Usage:
+    python prepare_media.py <folder of your media> <output folder> --assets ../assets
+
+  --assets   warns when a prepared file has the same name as a file already in
+             assets/ (copying it would overwrite another artwork's file)
 """
+from __future__ import annotations
+
 import csv
 import re
 import shutil
@@ -32,7 +37,7 @@ from pathlib import Path
 
 from PIL import Image
 
-Image.MAX_IMAGE_PIXELS = None  # les TIF de numérisation dépassent la limite par défaut
+Image.MAX_IMAGE_PIXELS = None  # scanned TIFs exceed Pillow's default limit
 
 CONVERT_EXTS = {'.tif', '.tiff', '.png'}
 COPY_IMAGE_EXTS = {'.jpg', '.jpeg'}
@@ -44,7 +49,7 @@ JPEG_QUALITY = 88
 
 
 def normalize_name(stem: str) -> str:
-    """MÊME règle que import_collection.normalize_media_name (stem uniquement)."""
+    """SAME rule as import_collection.normalize_media_name (stem only)."""
     s = unicodedata.normalize('NFKD', stem.strip().lower()).encode('ascii', 'ignore').decode()  # é -> e
     s = re.sub(r'[_.\s]+', '-', s)
     s = re.sub(r'[^a-z0-9-]', '', s)
@@ -52,7 +57,7 @@ def normalize_name(stem: str) -> str:
 
 
 def check_video(path: Path) -> str:
-    """Retourne le codec via ffprobe si disponible, sinon ''."""
+    """Video codec name via ffprobe if available, otherwise ''."""
     try:
         out = subprocess.run(
             ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
@@ -63,7 +68,7 @@ def check_video(path: Path) -> str:
         return ''
 
 
-def main(src_dir: str, out_dir: str) -> None:
+def main(src_dir: str, out_dir: str, assets_dir: str | None = None) -> None:
     src, out = Path(src_dir), Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     mapping, skipped, warnings = [], [], []
@@ -101,24 +106,24 @@ def main(src_dir: str, out_dir: str) -> None:
         elif ext in COPY_VIDEO_EXTS:
             target = out / (normalize_name(f.stem) + '.mp4')
             shutil.copy2(f, target)
-            # vignette : première image nette de la vidéo (le front l'affiche en grille)
+            # thumbnail: a frame of the video (the kiosk shows it in the grid)
             thumb = out / (normalize_name(f.stem) + '-thumb.jpg')
             try:
                 subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-ss', '1', '-i', str(f),
                                 '-frames:v', '1', '-vf', f'scale={MAX_SIDE}:-1', str(thumb)],
                                capture_output=True, timeout=60)
                 if thumb.exists():
-                    mapping.append((f.name + ' (vignette)', thumb.name,
+                    mapping.append((f.name + ' (thumbnail)', thumb.name,
                                     round(thumb.stat().st_size / 1024)))
                 else:
-                    warnings.append(f'{f.name} : vignette non générée (ffmpeg absent ?)')
+                    warnings.append(f'{f.name}: thumbnail not created (is ffmpeg installed?)')
             except Exception:
-                warnings.append(f'{f.name} : vignette non générée (ffmpeg absent ?)')
+                warnings.append(f'{f.name}: thumbnail not created (is ffmpeg installed?)')
             codec = check_video(f)
             if codec and codec not in ('h264', 'avc1'):
-                warnings.append(f'{f.name} : codec {codec} (le kiosk attend du H.264 — à ré-encoder)')
+                warnings.append(f'{f.name}: codec {codec} (the kiosk expects H.264, re-encode it)')
             elif not codec:
-                warnings.append(f'{f.name} : codec non vérifié (ffprobe absent)')
+                warnings.append(f'{f.name}: codec not checked (is ffprobe installed?)')
 
         else:
             skipped.append(f.name)
@@ -128,20 +133,44 @@ def main(src_dir: str, out_dir: str) -> None:
 
     with open(out / '_media_mapping.csv', 'w', newline='', encoding='utf-8') as fh:
         w = csv.writer(fh)
-        w.writerow(['fichier_origine', 'fichier_final', 'taille_ko'])
+        w.writerow(['original_file', 'final_file', 'size_kb'])
         w.writerows(mapping)
 
-    print(f'{len(mapping)} fichiers préparés dans {out.resolve()}')
-    print(f'{len(skipped)} ignorés (MOV, NEF, documents) : {", ".join(skipped[:6])}'
+    for name, final, size_kb in mapping:
+        if size_kb > 95 * 1024:
+            warnings.append(f'{final}: {size_kb / 1024:.0f} MB, GitHub refuses files over 100 MB (re-encode it)')
+    # name collisions: two of your files, or one of yours and a file already in assets/
+    finals = [final for _name, final, _size in mapping]
+    for final in sorted({f for f in finals if finals.count(f) > 1}):
+        sources = [name for name, f, _size in mapping if f == final]
+        warnings.append(f'{final}: produced by several files {sources}: rename them so they differ')
+    if assets_dir:
+        existing = {p.name for p in Path(assets_dir).iterdir() if p.is_file()}
+        clash = sorted(set(finals) & existing)
+        for final in clash:
+            warnings.append(f'{final} already exists in {assets_dir}: copying would overwrite another '
+                            "artwork's file. Rename yours (e.g. add your museum's name) and prepare it again")
+    print(f'{len(mapping)} files prepared in {out.resolve()}')
+    print(f'{len(skipped)} skipped (MOV, RAW, documents): {", ".join(skipped[:6])}'
           + (' ...' if len(skipped) > 6 else ''))
     total = sum(m[2] for m in mapping) / 1024
-    print(f'poids total : {total:.1f} Mo')
+    print(f'total size: {total:.1f} MB')
     for w_ in warnings:
         print('  ⚠', w_)
-    print(f'correspondance écrite dans {out / "_media_mapping.csv"}')
+    print(f'file name mapping written to {out / "_media_mapping.csv"}')
+    print('  → next step: copy the images and videos (not the CSV) into assets/, '
+          'then run import_collection.py')
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
+    args = sys.argv[1:]
+    assets = None
+    if '--assets' in args:
+        i = args.index('--assets')
+        assets = args[i + 1] if i + 1 < len(args) else None
+        del args[i:i + 2]
+        if not assets or not Path(assets).is_dir():
+            sys.exit('--assets: folder not found')
+    if len(args) != 2:
         sys.exit(__doc__)
-    main(sys.argv[1], sys.argv[2])
+    main(args[0], args[1], assets)
