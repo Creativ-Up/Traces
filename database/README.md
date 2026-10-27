@@ -444,5 +444,3 @@ after the update, copy your versions back and run `./scripts/build.sh`.
 | `check_collection.py` | Final check before deploying: media, vectors, translations |
 | `schema.sql`, `SCHEMA.md` | The database schema and its technical documentation (in French) |
 
-The database history (migrations V3 to V11, and the scripts removed in
-October 2026) is summarised in [`SCHEMA.md`](SCHEMA.md).
