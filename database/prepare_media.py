@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
 """
-Préparation des médias des nouveaux musées (Huis van Alijn, MuMons) pour le kiosk.
-
-À LANCER SUR LA MACHINE D'AURÉLIEN (les masters font ~2,5 Go, ils ne transitent pas).
+Prépare les médias livrés par un musée pour le kiosque TRACES.
 
 Ce que fait le script :
   - TIF / PNG  -> JPG qualité 88, redimensionné à 2000 px max sur le grand côté
-  - JPG / JPEG -> recopiés (re-encodés seulement si > 2000 px)
-  - MP4        -> recopiés tels quels (+ contrôle de l'encodage si ffprobe est là)
-  - MOV / NEF  -> IGNORÉS (masters de montage / RAW : doublons des MP4 et des JPG)
-  - renommage à la convention du projet : minuscules, séparateurs -> '-',
-    extension préservée (imadeyou-01-053.jpg)
-  - écrit un CSV de correspondance : nom d'origine -> nom final (sert au matching)
+  - JPG / JPEG -> recopiés en .jpg (ré-encodés seulement si > 2000 px)
+  - MP4        -> recopiés tels quels, + vignette « <nom>-thumb.jpg » extraite à
+                  1 seconde (ffmpeg) et contrôle du codec H.264 (ffprobe)
+  - MOV / RAW (NEF, CR2…) / documents -> ignorés : demander au musée des MP4
+    (H.264) et des JPG/TIF, ou les convertir avant
+  - renommage à la convention TRACES : minuscules, séparateurs -> '-',
+    extension préservée (IMadeYou_01_053.JPG -> imadeyou-01-053.jpg).
+    import_collection.py applique la même règle aux noms cités dans le tableur.
+  - écrit _media_mapping.csv dans le dossier de sortie : nom d'origine -> nom final
 
-Prérequis :  pip install pillow
+Le dossier de sortie est un dossier de travail : copier ensuite les médias
+(pas le CSV) dans assets/ à la racine du repo. Les vidéos doivent peser moins
+de 100 Mo (limite de GitHub) : ré-encoder les plus lourdes.
+
+Prérequis :  pip install pillow  (+ ffmpeg pour les vignettes des vidéos)
 Usage :
-    python prepare_media.py "C:\\Users\\539288\\Downloads\\transfer-01a00fb8" assets_hva
-    python prepare_media.py "C:\\Users\\539288\\Downloads\\MuMons_DB_TRACES"   assets_mumons
+    python prepare_media.py <dossier livré par le musée> <dossier de sortie>
 """
 import csv
 import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 from PIL import Image
@@ -39,8 +44,8 @@ JPEG_QUALITY = 88
 
 
 def normalize_name(stem: str) -> str:
-    """MÊME algorithme que migrate_v3.normalize_media_name (stem uniquement)."""
-    s = stem.strip().lower()
+    """MÊME règle que import_collection.normalize_media_name (stem uniquement)."""
+    s = unicodedata.normalize('NFKD', stem.strip().lower()).encode('ascii', 'ignore').decode()  # é -> e
     s = re.sub(r'[_.\s]+', '-', s)
     s = re.sub(r'[^a-z0-9-]', '', s)
     return re.sub(r'-{2,}', '-', s).strip('-')

@@ -40,9 +40,17 @@ def main(db_path: Path) -> None:
 
     print(f"\n[2/5] Connexion à la base et chargement de sqlite-vec : {db_path}")
     conn = sqlite3.connect(db_path)
-    conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
+    # L'extension ne sert qu'à la vérification finale : certains Python (macOS
+    # notamment) ne savent pas charger d'extension SQLite ; les vecteurs sont
+    # écrits quand même (serialize_float32 n'en a pas besoin).
+    vec_loaded = False
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+        vec_loaded = True
+    except (AttributeError, sqlite3.OperationalError) as exc:
+        print(f"      sqlite-vec non chargé ({exc}) : vérification finale ignorée")
     cur = conn.cursor()
 
     print(f"\n[3/5] Récupération des descriptions à encoder")
@@ -79,6 +87,11 @@ def main(db_path: Path) -> None:
     ).fetchone()[0]
     n_total = cur.execute("SELECT COUNT(*) FROM artworks").fetchone()[0]
     print(f"      {n_filled} / {n_total} items avec un vecteur")
+
+    if not vec_loaded:
+        conn.close()
+        print(f"\n✓ Embeddings calculés et stockés dans {db_path.resolve()}")
+        return
 
     # --- Vérification qualitative : top 5 plus proches d'une œuvre choisie ---
     sample_id = ids[0]

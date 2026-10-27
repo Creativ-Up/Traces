@@ -6,3 +6,6 @@ logs/*.log
 # safety net in case that file is ever removed or edited independently.
 backend/target/
 backend/models/
+
+# Python
+__pycache__/

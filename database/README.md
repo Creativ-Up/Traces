@@ -1,222 +1,272 @@
-# Traces — PP1 Collection Database
+# Verser les collections de votre musée dans TRACES
 
-Base SQLite du Pilot Projet 1 (Photomaton), peuplée et prête à l'emploi pour le
-backend. Le visiteur choisit sa langue (FR/NL/EN) en début de session : **tout
-contenu affiché existe en trois versions** (colonnes `_fr` / `_nl` / `_en`).
+TRACES présente aux visiteurs des objets de musée liés à l'enfance, leur pose
+une question sur leurs propres souvenirs et enregistre leur témoignage. Les
+souvenirs s'accumulent ainsi autour de chaque objet.
 
-La collection réunit **230 œuvres de cinq partenaires** :
+L'installation réunit aujourd'hui **230 œuvres de cinq institutions** : la
+Maison des collections de la Ville de Mons, Abby, Le Fresnoy, le Huis van
+Alijn et le MUMONS. Tous les textes existent en **français, néerlandais et
+anglais**.
 
-| Partenaire                            | Œuvres | IDs       |
-| ------------------------------------- | -----: | --------- |
-| Maison des collections, Ville de Mons |     99 | 1–120     |
-| Abby                                  |     13 | 1–120     |
-| Le Fresnoy                            |      4 | 1–120     |
-| **Huis van Alijn**                    | **99** | 121–219   |
-| **MUMONS**                            | **15** | 220–234   |
+Ce guide explique comment votre musée peut y ajouter ses propres œuvres. Il
+s'adresse d'abord aux équipes des musées ; la dernière partie décrit les
+commandes à lancer par l'équipe technique.
 
-## Contenu de la livraison
+## En bref
 
-| Fichier                      | Rôle                                                              |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `pp1_collection.db`          | La base SQLite complète, peuplée et prête à l'emploi (**V10**)    |
-| `schema.sql`                 | Le DDL en SQL pur (pour recréer la base from scratch si besoin)   |
-| `SCHEMA.md`                  | La documentation détaillée du schéma                              |
-| `PP1-Collection_Database.xlsx` | L'Excel de référence consolidé (230 lignes, tous partenaires)   |
-| `review_translations.xlsx`   | Le classeur de relecture des traductions (source de vérité des textes) |
-| `pp1_to_sqlite.py`           | Étape 1 — migration depuis le fichier Excel source                |
-| `translate_content.py`       | Étape 2 — traductions automatiques NLLB-200 (colonnes `_fr/_nl/_en`) |
-| `compute_embeddings.py`      | Étape 3 — vecteurs sémantiques (`description_fr`)                 |
-| `migrate_v3.py`              | **Le seul script rejouable** — ré-import des traductions relues (descriptions, mots-clés, titres, transcriptions, témoignages, émotions) |
-| `migrate_v4.py` … `migrate_v10.py` | Migrations ponctuelles, déjà appliquées (voir « Historique ») |
-| `prepare_media.py`           | Conversion des médias musée (TIF/PNG → JPG, vidéos, vignettes) vers `assets/` |
-| `check_images.py`            | Contrôle d'intégrité DB ↔ `assets/` (exit code 1 si référence cassée) |
-| `matching_report.csv`        | Mapping œuvre → images (une ligne par œuvre) pour vérification humaine |
-| `media_mapping_hva.csv`, `media_mapping_mumons.csv` | Correspondance fichier d'origine → fichier converti |
+| Étape | Qui | Quoi |
+| --- | --- | --- |
+| 1 | Le musée | Choisit ses œuvres et remplit le modèle de tableur `template_collection.xlsx` |
+| 2 | Le musée | Rassemble les images et vidéos, et les envoie avec le tableur |
+| 3 | L'équipe technique | Intègre les œuvres et prépare les traductions dans les deux autres langues |
+| 4 | Le musée | Relit les traductions dans un classeur Excel |
+| 5 | L'équipe technique | Intègre les corrections et met le kiosque à jour |
 
-> **Les médias sont versionnés dans `assets/`** (à la racine du monorepo), et
-> non plus sur un Drive partagé.
+Le musée n'a rien à installer : tout se fait dans Excel.
 
-## Historique des migrations
+## 1. Choisir les œuvres
 
-`migrate_v3.py` est **le seul script destiné à être relancé** : à chaque retour
-de relecture du musée, on met à jour `review_translations.xlsx` puis on le
-rejoue (il est idempotent). Les autres sont des migrations ponctuelles, déjà
-appliquées à la base versionnée ; elles ne servent qu'à reconstruire depuis un
-état antérieur.
+Les partenaires actuels ont fourni entre 4 et 99 œuvres chacun. Quelques
+repères :
 
-| Version | Objet |
-| ------- | ----- |
-| **V3**  | Ré-import des traductions relues, référentiel `emotions`, `keywords_*`, `thumbnail_url`, normalisation `media_url` |
-| **V4**  | Ajout de `artworks.title` / `title_fr/nl/en` |
-| **V5**  | Réparation du point d'extension de `media_url` (corrigé à la racine dans V3 depuis) |
-| **V6**  | `artwork_id` sur les témoignages enregistrés : chacun est rattaché à **une** œuvre de sa question (répartition équilibrée, option validée par le musée) |
-| **V7**  | Retrait de l'œuvre 15 (MSK_1199), sans média ni question |
-| **V8**  | Fusion des témoignages enregistrés dans `testimonies` (`visitor_id IS NULL`) ; `recorded_testimonies` supprimée |
-| **V9**  | `artworks.author` (Excel musée) et remplissage des titres i18n via la feuille « Titres » du classeur |
-| **V10** | Intégration des collections **Huis van Alijn** (99) et **MUMONS** (15) : médias convertis, vidéos, `origin` renseignée |
+- **Un lien avec l'enfance** : jouets, école, photographies de famille,
+  vêtements, archives (actes, lettres), fêtes, objets du quotidien…
+- **Des images de bonne qualité** : les œuvres sont affichées en grand, sur un
+  écran de 44 pouces.
+- **Des droits d'utilisation** : les images et les textes sont affichés dans
+  l'installation **et publiés dans ce dépôt GitHub, qui est public**. Le
+  musée doit pouvoir autoriser ces deux usages.
+- **Des personnes reconnaissables** : pour une photographie de personnes
+  vivantes identifiables, assurez-vous que leur accord le permet.
 
-## Mettre à jour sa copie locale
+Chaque œuvre est associée à **une des 12 questions** posées au visiteur juste
+après l'avoir découverte. Choisissez pour chaque œuvre la question qui lui
+correspond le mieux :
+
+| N° | Question posée au visiteur |
+| --- | --- |
+| 1 | Et vous ? Comment était votre enfance ? Était-elle heureuse, triste, ennuyeuse ? Quel est le premier souvenir qui vous vient à l'esprit quand vous pensez à votre enfance ? |
+| 2 | Si vous aviez un espace très limité pour conserver des souvenirs, quels sont les 3 souvenirs que vous garderiez ? |
+| 3 | Et vous ? Conservez-vous un objet spécial ou symbolique de votre enfance, hérité de vos parents ? Pouvez-vous nous raconter son histoire ? |
+| 4 | Enfant, vous souvenez-vous de vous être réveillé la nuit à cause d'un cauchemar ? Ou au contraire, y a-t-il un rêve agréable et marquant dont vous vous souvenez encore ? |
+| 5 | Aviez-vous des animaux de compagnie quand vous étiez enfant ? Quel est votre meilleur souvenir d'enfance avec un animal ? |
+| 6 | Quel était votre jeu préféré quand vous étiez enfant ? |
+| 7 | Avez-vous un souvenir d'enfance lié à une lettre — écrite, envoyée ou reçue — qui vous a marqué ? Pouvez-vous nous raconter votre histoire ? |
+| 8 | Savez-vous pourquoi vos parents ont choisi votre prénom ? Quelle est l'histoire derrière ce choix ? |
+| 9 | Avez-vous un souvenir d'enfance lié à un vêtement particulier ou à un uniforme que vous portiez quand vous étiez petit ? |
+| 10 | Quel est votre meilleur souvenir d'enfance lié à une fête comme la Saint-Nicolas ou Noël ? |
+| 11 | Quel est le premier souvenir d'enfance marquant, lié à des retrouvailles avec des êtres chers, qui vous vient à l'esprit ? |
+| 12 | Et vous, quand vous étiez enfant et que vous aviez besoin d'être réconforté ou protégé, vos parents ou grands-parents invoquaient-ils un saint, un proche ou un personnage particulier, réel ou imaginaire ? Aviez-vous une figure protectrice ? Qui était-ce ? |
+
+## 2. Remplir le tableur
+
+Ouvrez `template_collection.xlsx` et remplissez la feuille **« Œuvres »**,
+une ligne par œuvre à partir de la ligne 3. La ligne 1 rappelle le contenu de
+chaque colonne et la ligne 2 contient les en-têtes : ne les modifiez pas. La
+feuille « Exemple » montre une ligne remplie.
+
+| Colonne | Obligatoire | Contenu | Exemple |
+| --- | --- | --- | --- |
+| Database ID | non | **À laisser vide** : TRACES attribue les identifiants | |
+| Museum ID | oui | Numéro d'inventaire de l'objet chez vous | `INV.1987.042` |
+| Origin | oui | Nom de votre institution, identique sur toutes les lignes | `Musée de l'Exemple` |
+| Language | oui | Langue des textes de la ligne : `fr`, `nl` ou `en` | `fr` |
+| Type of object | oui | Une catégorie de la feuille « Types » (liste déroulante) | `Toy or game` |
+| Date /period | oui | Date ou période, sous une forme lisible | `1935`, `1870-1880`, `19e siècle` |
+| Title | oui | Titre affiché au visiteur | `Ours en peluche` |
+| Author | non | Auteur, artiste ou fabricant | |
+| Name | non | Personnes liées à l'objet (modèle, destinataire…) | |
+| Storage place | non | Ville ou lieu de conservation | `Mons` |
+| Keywords | oui | Mots-clés sur la forme **et** le contenu, séparés par des virgules | `ours, peluche, jouet, tissu usé` |
+| Emotions | oui | 2 à 4 émotions de la feuille « Émotions », séparées par des virgules | `Joie, Confiance` |
+| Explanation | oui | Texte de présentation lu par le visiteur | 3 à 8 phrases |
+| Question | oui | Numéro de la question associée (1 à 12, voir plus haut) | `3` |
+| Media | oui | Noms des fichiers images ou vidéos, séparés par des virgules | `INV_1987_042_face.jpg` |
+
+Quelques conseils :
+
+- **Une seule langue par ligne.** Écrivez chaque œuvre dans la langue où vous
+  êtes le plus à l'aise ; les lignes peuvent être dans des langues
+  différentes. Les deux autres langues sont préparées pour vous (étape 3).
+- **Le texte « Explanation »** est lu à l'écran, debout, par un public
+  familial : phrases courtes, pas de jargon. Décrivez concrètement ce que
+  montre l'objet et son histoire. Ce texte sert aussi à rapprocher les œuvres
+  qui se ressemblent.
+- **Les émotions** viennent de la roue des émotions de Plutchik : joie,
+  confiance, tristesse, sérénité… (« nostalgie », par exemple, n'en fait pas
+  partie). Les libellés français, néerlandais ou anglais de la feuille
+  « Émotions » sont tous acceptés. Elles servent à proposer au visiteur des
+  œuvres qui se répondent.
+- **Un type d'objet absent de la liste** est accepté, mais il sera créé et
+  traduit à part : préférez une catégorie existante quand c'est possible.
+
+**Objets portant un texte** (lettre, acte, inscription, étiquette) : utilisez
+aussi la feuille facultative **« Transcriptions »**. Recopiez le texte tel
+qu'il est écrit sur l'objet (orthographe d'origine), avec une courte
+explication pour le visiteur, et reprenez le même Museum ID que dans
+« Œuvres ».
+
+## 3. Préparer les médias
+
+| Média | Format attendu | Remarques |
+| --- | --- | --- |
+| Images | JPG ou TIF, au moins 1 500 px sur le grand côté | Converties et réduites à 2 000 px par nos soins. Une image par vue ; la **première** de la colonne Media sert de vignette |
+| Vidéos | MP4 (codec H.264), **moins de 100 Mo** par fichier | Un extrait de 30 secondes à 3 minutes suffit. Une vignette est extraite automatiquement |
+
+Deux points importants pour les vidéos :
+
+- **Elles sont jouées sans le son**, en boucle et sans boutons de lecture.
+  Si la parole compte, fournissez une version sous-titrée (sous-titres
+  incrustés dans l'image).
+- Les formats MOV et les fichiers bruts d'appareil photo (NEF, CR2…) ne sont
+  pas pris en charge : exportez-les en MP4 ou en JPG.
+
+Inutile de renommer vos fichiers : indiquez simplement leur nom exact dans la
+colonne Media. Envoyez le tableur et un dossier contenant tous les médias
+(par WeTransfer, SharePoint ou une clé USB).
+
+## 4. Relire les traductions
+
+Nous traduisons vos textes dans les deux autres langues avec
+[DeepL](https://www.deepl.com), puis nous vous envoyons le classeur de
+relecture `review_translations.xlsx`. Une traduction automatique ne suffit
+pas pour un texte affiché au public : **votre relecture est indispensable**.
+
+Dans le classeur :
+
+- chaque feuille correspond à un type de texte (Titres, Descriptions, mots-clés,
+  Transcriptions…) ; la colonne `id` est l'identifiant TRACES de chaque œuvre.
+  Le classeur contient les textes de tous les partenaires : **nous vous
+  indiquons les identifiants de vos œuvres**, ne relisez que ces lignes ;
+- **corrigez uniquement les cellules jaunes**. Celles qui portent le
+  commentaire « Traduction automatique (DeepL) — à relire » n'ont encore été
+  relues par personne ;
+- les cellules grises (identifiant, texte d'origine) ne doivent pas être
+  modifiées, et les lignes ne doivent être ni ajoutées, ni supprimées, ni
+  déplacées.
+
+Ce qu'il faut vérifier : le sens, le vocabulaire propre à votre domaine, les
+noms propres, les titres (faut-il les traduire ou les garder tels quels ?) et
+le registre : vouvoiement ou tutoiement, cohérent avec le reste de vos
+textes.
+
+Selon le calendrier, les traductions automatiques peuvent être mises en
+service en attendant votre relecture ; vos corrections les remplacent alors à
+la mise à jour suivante.
+
+## 5. Mise en service
+
+L'équipe technique intègre vos corrections, vérifie la base, puis met à jour
+le kiosque sans perdre les témoignages déjà recueillis
+(procédure : [`docs/update-collection.md`](../docs/update-collection.md)).
+
+Vos œuvres apparaissent alors dans le parcours. Les témoignages que les
+visiteurs laissent à leur sujet sont relus par l'équipe du lieu d'exposition
+avant d'être montrés aux visiteurs suivants. **Les témoignages des visiteurs
+restent sur l'ordinateur de l'installation** : ils ne sont jamais publiés
+dans ce dépôt.
+
+### Ce que deviennent vos données
+
+Les images, vidéos et textes de vos œuvres sont publiés dans ce dépôt GitHub
+public. Ils ne sont pas couverts par la licence du code : **ils restent votre
+propriété** et ne peuvent pas être réutilisés sans votre accord.
+
+---
+
+## Pour l'équipe technique
+
+### Prérequis
+
+- Python 3.9 ou plus récent, puis :
+  `pip install openpyxl pillow deepl sentence-transformers sqlite-vec numpy`
+- [ffmpeg](https://ffmpeg.org) pour les vignettes des vidéos
+- Une clé d'API DeepL. Le plan gratuit (« Developer ») offre un **crédit
+  unique de 1 000 000 de caractères, qui ne se renouvelle pas** ; au-delà, il
+  faut passer à un plan payant. Une collection de 100 œuvres demande entre
+  50 000 et 200 000 caractères selon la longueur des notices : le crédit
+  gratuit couvre donc plusieurs collections. `--dry-run` donne le chiffre
+  exact sans rien consommer, et le script affiche le crédit restant à chaque
+  passage. La clé se passe par la variable d'environnement `DEEPL_AUTH_KEY`
+  (sous Windows PowerShell : `$env:DEEPL_AUTH_KEY = "votre-clé"`).
+
+Les textes envoyés à DeepL sont les notices publiques des œuvres, jamais les
+témoignages.
+
+### Intégrer une nouvelle collection
+
+Depuis le dossier `database/` :
 
 ```bash
-git pull
-# la base à jour est dans database/pp1_collection.db
+# 1. médias : conversion et noms normalisés, dans un dossier de travail HORS du dépôt
+python prepare_media.py "<dossier livré par le musée>" "<dossier de travail>"
+#    puis copier les images et vidéos (pas le CSV) dans ../assets/
+
+# 2. œuvres : vérifier d'abord (--dry-run n'écrit rien), puis importer
+python import_collection.py pp1_collection.db "<tableur du musée>.xlsx" --assets ../assets --dry-run
+python import_collection.py pp1_collection.db "<tableur du musée>.xlsx" --assets ../assets
+
+# 3. traductions : estimer le volume, puis traduire vers le classeur de relecture
+python translate_collection.py pp1_collection.db review_translations.xlsx --dry-run
+python translate_collection.py pp1_collection.db review_translations.xlsx
+
+# 4. charger les traductions en base
+python import_translations.py pp1_collection.db review_translations.xlsx
+
+# 5. vecteurs sémantiques (obligatoire : sans vecteur, le serveur du kiosque ne démarre pas)
+python compute_embeddings.py pp1_collection.db
+
+# 6. contrôle final : doit afficher « BASE PRÊTE À DÉPLOYER »
+python check_collection.py --db pp1_collection.db --images ../assets
 ```
 
-Rien d'autre à faire : la DB est versionnée directement dans le repo. Pour les
-requêtes vectorielles, voir la section sqlite-vec ci-dessous.
+Puis committer `database/pp1_collection.db`, `database/review_translations.xlsx`
+et les nouveaux fichiers de `assets/`, et déployer sur le kiosque avec
+[`docs/update-collection.md`](../docs/update-collection.md).
 
-### Cas du kiosque
+Le rapport de `import_collection.py` signale chaque problème du tableur
+(type ou émotion inconnus, média introuvable, colonne obligatoire vide…) et
+liste les identifiants attribués, à communiquer au musée pour la relecture.
+Faites corriger le tableur et relancez : l'import ne crée jamais de doublon.
+Pour modifier des œuvres déjà intégrées, ajoutez `--update`, toujours avec le
+tableur du musée concerné (jamais `PP1-Collection_Database.xlsx`, refusé) ;
+une valeur non reconnue n'écrase jamais la valeur existante.
+`--origin "<nom du musée>"` limite l'import à un musée.
 
-Sur une machine kiosque, `pp1_collection.db` est modifiée en continu à
-l'exécution (visiteurs, témoignages, résumés) : un `git pull` brut écraserait
-ou entrerait en conflit avec ces écritures locales. Utiliser à la place :
+`translate_collection.py --ids 235-260` limite la traduction à certaines
+œuvres ; `--keep-titles` recopie les titres sans les traduire (titres de
+films, noms propres).
 
-- `scripts/update.sh` — pull du monorepo en conservant la DB locale du
-  kiosque (elle est mise de côté puis restaurée après coup ; la version
-  d'origin atterrit quand même dans l'historique Git, juste jamais appliquée
-  à la copie de travail).
-- `scripts/apply-remote-db.sh` — à lancer juste après `update.sh` quand la
-  collection a changé : sauvegarde la DB du kiosque, puis fusionne ses données
-  visiteurs dans la nouvelle base de référence (`merge_kiosk_data.py`). Procédure
-  complète : `docs/update-collection.md`.
+### Au retour de la relecture
 
-Les deux scripts sont à exécuter à la main, comme les autres scripts du
-dossier `scripts/` — aucun timer n'est configuré.
-
-> **La base d'un kiosque ne doit jamais être poussée sur GitHub** : le repo est
-> public et elle contient les témoignages des visiteurs. Les sauvegardes se font
-> en local (Bureau, clé USB), via `apply-remote-db.sh`.
-
-## Vue d'ensemble du schéma
-
-11 tables + 1 vue, deux familles :
-
-**Données de référence** (peuplées depuis l'Excel et la relecture) :
-
-- `artworks` — 230 œuvres : titres i18n, descriptions i18n, mots-clés i18n,
-  auteur, provenance (`origin`), dates, médias, vignette, vecteurs
-- `transcriptions` — 85 transcriptions liées aux œuvres (1:0..1), traductions
-  et explications i18n
-- `artwork_emotions` — 595 émotions Plutchik normalisées (jointure pour Jaccard)
-- `emotions` — référentiel i18n des 32 libellés d'émotions
-- `types_of_object` — 27 types d'objets (vocabulaire contrôlé, i18n)
-- `questions` — 12 questions de référence du parcours visiteur (i18n)
-
-**Données dynamiques** (remplies au runtime par le backend) :
-
-- `visitors` — sessions visiteurs éphémères (PK = UUID de session)
-- `visitor_artwork_views` — historique de consultation
-- `testimonies` — témoignages : les **150 interviews** collectées (Mons, Lens,
-  Kortrijk) y cohabitent avec ceux des visiteurs, distinguées par
-  `visitor_id IS NULL` (**V8**)
-- `summaries` — résumés LLM générés en fin de parcours
-- `staff` — modérateurs des témoignages
-- `artwork_published_testimonies` — vue des témoignages publiables
-  (`status='validated' AND consent_given=1`)
-
-Le diagramme complet, les colonnes et les contraintes sont dans `SCHEMA.md`.
-
-## Choix techniques importants
-
-### 1. SQLite + sqlite-vec pour les embeddings
-
-La colonne `artworks.description_vector` contient un embedding sémantique de
-`description_fr` (768 dimensions, modèle `paraphrase-multilingual-mpnet-base-v2`).
-Requêtes de similarité directement en SQL :
-
-```python
-import sqlite3
-import sqlite_vec
-
-conn = sqlite3.connect("pp1_collection.db")
-conn.execute("PRAGMA foreign_keys = ON")
-conn.enable_load_extension(True)
-sqlite_vec.load(conn)
-
-# Œuvre la plus proche sémantiquement de l'œuvre #1
-conn.execute("""
-    SELECT a.id, vec_distance_cosine(a.description_vector,
-                                     (SELECT description_vector FROM artworks WHERE id = 1))
-    FROM artworks a
-    WHERE a.id != 1
-    ORDER BY 2 ASC LIMIT 1
-""").fetchone()
+```bash
+python import_translations.py pp1_collection.db review_translations_corrige.xlsx
+python compute_embeddings.py pp1_collection.db        # si des descriptions françaises ont changé
+python check_collection.py --db pp1_collection.db --images ../assets
 ```
 
-> Si les descriptions **françaises** sont modifiées (retour du musée sur la
-> relecture), relancer `compute_embeddings.py` pour resynchroniser les vecteurs.
-> Une correction NL ou EN seule n'affecte pas les vecteurs.
+Remplacer ensuite `review_translations.xlsx` par le classeur corrigé avant de
+committer. Le classeur étant unique, ne l'envoyer qu'à un musée à la fois. Une ligne dont le texte d'origine a changé depuis la traduction
+est laissée de côté (avec un avertissement) : relancer alors
+`translate_collection.py`.
 
-### 2. Algorithme de matching à 4 critères
+### Contenu du dossier
 
-À partir d'une œuvre de référence, proposer 4 œuvres : une proche en **type**,
-une en **description** (vecteur), une en **émotions** (Jaccard sur
-`artwork_emotions`), une en **date** (distance entre centres d'intervalles via
-`date_year_min` / `date_year_max`).
+| Fichier | Rôle |
+| --- | --- |
+| `pp1_collection.db` | La base SQLite de référence, lue par le serveur du kiosque |
+| `template_collection.xlsx` | Le modèle de tableur à envoyer aux musées |
+| `PP1-Collection_Database.xlsx` | Le tableur source des 230 œuvres actuelles (même format) |
+| `review_translations.xlsx` | Le classeur de relecture : source de vérité de tous les textes FR / NL / EN |
+| `prepare_media.py` | Conversion et renommage des médias livrés par un musée |
+| `import_collection.py` | Import des œuvres d'un tableur dans la base |
+| `translate_collection.py` | Traductions DeepL vers le classeur de relecture |
+| `import_translations.py` | Import du classeur de relecture dans la base |
+| `compute_embeddings.py` | Vecteurs sémantiques des descriptions (choix des œuvres proposées) |
+| `check_collection.py` | Contrôle avant déploiement : médias, vecteurs, traductions |
+| `schema.sql`, `SCHEMA.md` | Le schéma de la base et sa documentation technique |
 
-### 3. Affichage multilingue
-
-Règle générale : afficher `X_fr` / `X_nl` / `X_en` selon la langue de session ;
-la colonne sans suffixe est la source (traçabilité, usage interne). Pour les
-émotions : `JOIN emotions ON artwork_emotions.emotion = emotions.emotion` puis
-`name_fr/nl/en`.
-
-> **La langue source varie d'une œuvre à l'autre**, y compris au sein d'un même
-> partenaire : Huis van Alijn a rédigé une partie de ses descriptions en
-> néerlandais et une partie en français. Ne jamais déduire la langue d'un texte
-> de sa provenance — les colonnes i18n sont toutes remplies, utiliser celle de
-> la langue de session.
-
-### 4. Médias : images et vidéos
-
-`media_url` liste un ou plusieurs fichiers de `assets/`, séparés par `, `.
-**Le type se déduit de l'extension** : `.jpg` → image, `.mp4` → vidéo (le front
-rend une balise `<video>`). `thumbnail_url` désigne toujours une image, y
-compris pour les œuvres purement vidéo (vignette `*-thumb.jpg` extraite de la
-première seconde par `prepare_media.py`).
-
-Formats retenus avec les musées : **JPEG** pour les photos, **MP4 (H.264)**
-pour les vidéos. Les masters (TIF, MOV, NEF) restent chez les partenaires.
-
-### 5. Contraintes métier matérialisées en SQL
-
-- `UNIQUE (visitor_id, artwork_id)` sur `testimonies` → un témoignage par œuvre
-  et par visiteur.
-- `UNIQUE artwork_id` sur `transcriptions` → relation 1:0..1.
-- `UNIQUE visitor_id` sur `summaries` → un seul résumé par visiteur.
-- `CHECK status IN ('pending', 'validated', 'censored')` et
-  `CHECK consent_given IN (0, 1)` sur `testimonies`.
-
-**Règle non matérialisée** (côté backend) : un témoignage n'est visible aux
-autres visiteurs que si `status='validated'` **et** `consent_given=1`
-(la vue `artwork_published_testimonies` encapsule cette règle).
-
-## Données et qualité
-
-- 230 œuvres, toutes datées, toutes avec médias et toutes avec un titre i18n
-- 230 vecteurs d'embedding
-- 6 œuvres vidéo (Huis van Alijn), avec vignette dédiée
-- 85 transcriptions dont 71 avec traduction de billet et 35 avec explication
-- 150 témoignages enregistrés, 32 libellés d'émotions traduits
-- `author` renseigné pour 14 œuvres, `author_name` pour 99 : deux colonnes
-  distinctes issues de l'Excel (« Author » et « Name »). Pour l'affichage,
-  utiliser `COALESCE(author, author_name)`.
-
-### Points à connaître
-
-- **IDs manquants** : les œuvres 8, 12 et 50 sont absentes (items supprimés
-  volontairement après attribution des IDs), ainsi que l'œuvre 15 (retirée en
-  **V7** : aucun média). La ligne 15 subsiste dans le classeur de relecture —
-  `migrate_v3.py` la saute donc : « 1 id keywords sans correspondance » est le
-  rapport **normal**, pas une régression.
-- **Coquilles de dates** : « 1800-1851 » et « 1800-1852 » dans la source sont
-  probablement des erreurs pour « 1800-1850 ». Acceptées telles quelles.
-- **Anomalies médias** (en attente d'arbitrage musée) : 2 photos
-  `JL.2022.0.65` sans œuvre en base ; `imadeyou-06-1243.jpg` non référencée par
-  l'œuvre 1 ; les œuvres 56 et 64 partagent les mêmes 5 photos (fidèle à
-  l'Excel source). Vérifiable à tout moment :
-  `python check_images.py --db pp1_collection.db --images ../assets`
-- **Relecture continue** : les traductions des collections Huis van Alijn et
-  MUMONS ont été produites en première passe puis relues par les partenaires.
-  En cas de nouvel amendement, mettre à jour `review_translations.xlsx` puis
-  relancer `migrate_v3.py`.
+Les anciens scripts de migration (V3 à V11) ont été appliqués à la base puis
+retirés du dépôt ; ils restent consultables dans l'historique Git. Leur
+historique est résumé dans [`SCHEMA.md`](SCHEMA.md).

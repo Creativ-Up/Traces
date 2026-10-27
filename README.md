@@ -14,6 +14,10 @@ page (opened on a phone connected to the kiosk's own wifi hotspot) lets
 staff approve or reject testimonies before they're shown to future
 visitors.
 
+**Museums**: to add your own collection to TRACES, see
+[`database/README.md`](database/README.md) (in French): what to provide, the
+spreadsheet template, media formats and the translation review process.
+
 ---
 
 ## For kiosk administrators
@@ -167,7 +171,7 @@ scripts and static files needed to run the kiosk:
 ```
 ./
 ├── backend/     Rust/Rocket API server (own README: build details, routes)
-├── database/    SQLite schema + Python migration pipeline (own README, in French)
+├── database/    SQLite database + tools to add a museum's collection (own README, in French)
 ├── frontend/    the kiosk UI — a git SUBMODULE, see "The frontend submodule" below
 ├── scripts/     install/build/run/update/uninstall — see "For kiosk administrators" above
 ├── assets/      artwork images, served at /assets
